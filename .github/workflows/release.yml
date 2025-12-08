@@ -26,10 +26,11 @@ jobs:
             -x "config-management/*" \
             -x "scripts/*" \
             -x ".git/*" \
-            -x ".github/*"
-            -x "Pi_Connector.drawio"
-            -x "image.png"
-            -x "LICENSE"
+            -x ".github/*" \
+            -x "Pi_Connector.drawio" \
+            -x "image.png" \
+            -x "LICENSE" \
+            -x "README.md"
           echo "zip_name=$ZIP_NAME" >> $GITHUB_OUTPUT
 
       - name: Upload artifact
