@@ -1,0 +1,46 @@
+name: Build and Upload ZIP Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: vars
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Create ZIP package (exclude directories)
+        id: zip
+        run: |
+          ZIP_NAME="pi_connector_${{ steps.vars.outputs.version }}.zip"
+          zip -r "$ZIP_NAME" . \
+            -x "config/*" \
+            -x "config-management/*" \
+            -x "scripts/*" \
+            -x ".git/*" \
+            -x ".github/*"
+            -x "Pi_Connector.drawio"
+            -x "image.png"
+            -x "LICENSE"
+          echo "zip_name=$ZIP_NAME" >> $GITHUB_OUTPUT
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pi-connector-zip
+          path: ${{ steps.zip.outputs.zip_name }}
+
+      - name: Create GitHub Release and upload ZIP
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          files: ${{ steps.zip.outputs.zip_name }}

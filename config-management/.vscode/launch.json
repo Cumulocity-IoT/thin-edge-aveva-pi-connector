@@ -1,0 +1,14 @@
+{
+    "configurations": [
+        {
+            "type": "java",
+            "name": "Spring Boot-TcpAgent<c8y-tracker-agent>",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "mainClass": "cumulocity.microservice.tcpagent.TcpAgent",
+            "projectName": "c8y-tracker-agent",
+            "args": "",
+            "envFile": "${workspaceFolder}/.env"
+        }
+    ]
+}

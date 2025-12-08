@@ -1,0 +1,177 @@
+{
+	"info": {
+		"_postman_id": "e6733e5a-47ca-43e6-869e-3348434b3026",
+		"name": "Config-Management",
+		"description": "This is the exposed API used to perform `POST` and `GET` operations on Cumulocity tenant options. It is utilized by the PI Historian service to retrieve configuration details and credentials stored in the tenant options",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+	"item": [
+		{
+			"name": "CreateConfig",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Cache-Control",
+						"value": "no-cache",
+						"name": "cache-control",
+						"type": "text"
+					},
+					{
+						"key": "Postman-Token",
+						"value": "<calculated when request is sent>",
+						"name": "postman-token",
+						"type": "text"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"name": "content-type",
+						"type": "text"
+					},
+					{
+						"key": "Content-Length",
+						"value": "<calculated when request is sent>",
+						"name": "content-length",
+						"type": "text"
+					},
+					{
+						"key": "Host",
+						"value": "<calculated when request is sent>",
+						"name": "host",
+						"type": "text"
+					},
+					{
+						"key": "User-Agent",
+						"value": "PostmanRuntime/7.39.1",
+						"name": "user-agent",
+						"type": "text"
+					},
+					{
+						"key": "Accept",
+						"value": "*/*",
+						"name": "accept",
+						"type": "text"
+					},
+					{
+						"key": "Accept-Encoding",
+						"value": "gzip, deflate, br",
+						"name": "accept-encoding",
+						"type": "text"
+					},
+					{
+						"key": "Connection",
+						"value": "keep-alive",
+						"name": "connection",
+						"type": "text"
+					},
+					{
+						"key": "Authorization",
+						"value": "{{auth}}",
+						"type": "text",
+						"disabled": true
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n    \"category\": \"PIHistorian\",\r\n    \"key\": \"credentials.<DeviceId> \", //This same device Id must be used while setting up the thinedge device in the thinedge_setup.sh script\r\n    \"value\": \"{\\\"url\\\":\\\"https://10.89.81.167/piwebapi\\\", \\\"user\\\":\\\"VDiwevedi\\\", \\\"password\\\":\\\"#######\\\"}\"\r\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{url}}/service/config-management/config",
+					"host": [
+						"{{url}}"
+					],
+					"path": [
+						"service",
+						"config-management",
+						"config"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "GetConfig",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Cache-Control",
+						"value": "no-cache",
+						"name": "cache-control",
+						"type": "text"
+					},
+					{
+						"key": "Postman-Token",
+						"value": "<calculated when request is sent>",
+						"name": "postman-token",
+						"type": "text"
+					},
+					{
+						"key": "Host",
+						"value": "<calculated when request is sent>",
+						"name": "host",
+						"type": "text"
+					},
+					{
+						"key": "User-Agent",
+						"value": "PostmanRuntime/7.39.1",
+						"name": "user-agent",
+						"type": "text"
+					},
+					{
+						"key": "Accept",
+						"value": "*/*",
+						"name": "accept",
+						"type": "text"
+					},
+					{
+						"key": "Accept-Encoding",
+						"value": "gzip, deflate, br",
+						"name": "accept-encoding",
+						"type": "text"
+					},
+					{
+						"key": "Connection",
+						"value": "keep-alive",
+						"name": "connection",
+						"type": "text"
+					},
+					{
+						"key": "Authorization",
+						"value": "{{auth}}",
+						"type": "text",
+						"disabled": true
+					}
+				],
+				"url": {
+					"raw": "{{url}}/service/config-management/config?category=PIHistorian&key=credentials.tedge-test-vm2",
+					"host": [
+						"{{url}}"
+					],
+					"path": [
+						"service",
+						"config-management",
+						"config"
+					],
+					"query": [
+						{
+							"key": "category",
+							"value": "PIHistorian"
+						},
+						{
+							"key": "key",
+							"value": "credentials.tedge-test-vm2"
+						}
+					]
+				}
+			},
+			"response": []
+		}
+	]
+}
