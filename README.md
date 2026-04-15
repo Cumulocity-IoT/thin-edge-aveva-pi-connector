@@ -1,6 +1,6 @@
 # PI Historian Service
 
-A Python-based service designed to read data from the AVEVA PI System and publish it to an MQTT broker. The application also supports live configuration updates, enabling runtime changes without the need for a restart.
+A Python-based service for [Thin Edge](https://thin-edge.io/) designed to read data from the AVEVA PI System and publish it to an MQTT broker. The application also supports live configuration updates, enabling runtime changes without the need for a restart.
 
 ## Architecture Diagram
 ![alt text](image.png)
@@ -36,7 +36,7 @@ The following configuration files must be uploaded to the Cumulocity tenant for 
         "78FIQ301.A",
         "78FIC102.A"
     ]
-### Configuration via ThinEdge
+### Configuration via Thin Edge
 
 Update your `tedge-configuration-plugin` to include the configuration files:
 
@@ -66,7 +66,7 @@ user = "tedge"
 group = "tedge"
 mode = 0o644
 ```
-Push these configurations from the Cumulocity UI under the Configuration tab of the ThinEdge device.
+Push these configurations from Cumulocity Device Management under the Configuration tab of the Thin Edge device.
 
 Sample pi_config.json
 ```
@@ -80,8 +80,8 @@ Sample pi_config.json
 
 Make sure the following are in place before proceeding:
 
-- ThinEdge agent installed and connected to the Cumulocity tenant
-- Device registered as a ThinEdge device
+- Thin Edge installed and connected to the Cumulocity tenant
+- Device registered as a Thin Edge device
 - Docker installed on the target VM
 - Container group feature installed on the device
 - Mosquitto broker exposed for external communication
@@ -109,10 +109,10 @@ zip -r package_name.zip . -x "config/*" "config-management/*" "scripts/*"
 - Upload the `.zip` file
 - Set the **Software Type** to `container-group`
 
-### 2. Deploy to ThinEdge Device
+### 2. Deploy to Thin Edge Device
 
-- Navigate to the target **ThinEdge device** in Cumulocity
+- Navigate to the target **Thin Edge device** in Cumulocity Device Management
 - Go to **Software > Install**
 - Select the uploaded software package and version
 
-The container will be deployed and started automatically on the ThinEdge VM.
+The container will be deployed and started automatically on the Thin Edge VM.
