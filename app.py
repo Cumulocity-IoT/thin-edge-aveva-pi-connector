@@ -7,6 +7,7 @@ import logging
 import logging.config
 import urllib3
 import requests
+import base64
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any
 from logging.handlers import RotatingFileHandler
@@ -60,21 +61,10 @@ def read_json_file(file_path: str) -> Dict[str, Any]:
         log.error(f"Failed to read JSON from {file_path}: {e}")
         return {}
 
-def update_config_from_api():
-    try:
-        url = f"http://{CONFIG['MQTT_BROKER']}:{CONFIG['HTTP_PORT']}/c8y/{CONFIG['ENDPOINT']}"
-        params = {"category": CONFIG.get("CATEGORY", ""), "key": f"credentials.{CONFIG.get('KEY', '')}"}
-        response = requests.get(url, params=params)
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        log.error(f"Error fetching config from service: {e}")
-        return {}
-
 def init_pi_session():
     global pi_client, pi_auth
     pi_client = requests.Session()
-    pi_auth = HTTPBasicAuth(CONFIG.get("PI_USER", ""), CONFIG.get("PI_PASSWORD", ""))
+    pi_auth = HTTPBasicAuth(CONFIG.get("PI_USER", ""), base64.b64decode(CONFIG.get("PI_PASSWORD", ""), validate=True))
 
 def load_configuration():
     global pi_config
@@ -85,17 +75,8 @@ def load_configuration():
     if not pi_config:
         log.error("No valid pi_config.json found, using existing configuration.")
         return
+    log.info("Configuration loaded successfully.")
 
-    try:
-        res = update_config_from_api()
-        pi_config["PI_USER"] = res.get('user')
-        pi_config["PI_PASSWORD"] = res.get('password')
-        pi_config["PI_URL"] = res.get('url')
-        CONFIG.update(pi_config)
-        init_pi_session()  # ← Initialize global PI session and auth
-        log.info("Configuration reloaded successfully.")
-    except Exception as e:
-        log.error(f"Failed to decode credentials: {e}")
 
 def load_datapoints():
     global datapoint_list

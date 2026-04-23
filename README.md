@@ -28,7 +28,10 @@ The following configuration files must be uploaded to the Cumulocity tenant for 
     ```json
     {
         "RECORDING_AT_TIME": "?time=",
-        "POLL_INTERVAL": 90
+        "POLL_INTERVAL": 90,
+        "PI_USER": "default_user",
+        "PI_PASSWORD": "default_password-base64-encoded",
+        "PI_URL": "https://default-url.com"
     }
 - `datapoints.json`: This contains the list of tags that must be read by the script and integrated to the Cumulocity tenant along with any user friendly name (optional).
     ```json
@@ -72,7 +75,10 @@ Sample pi_config.json
 ```
 {
     "RECORDING_AT_TIME": "?time=",
-    "POLL_INTERVAL": 90
+    "POLL_INTERVAL": 90,
+    "PI_USER": "default_user",
+    "PI_PASSWORD": "default_password-base64-encoded",
+    "PI_URL": "https://default-url.com"
 }
 
 ```
