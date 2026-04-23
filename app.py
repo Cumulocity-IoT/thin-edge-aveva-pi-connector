@@ -21,6 +21,8 @@ from paho.mqtt.client import CallbackAPIVersion
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Setup Logging
+LOG_DIR = "logs"
+os.makedirs(LOG_DIR, exist_ok=True)
 logging.config.fileConfig('logging.conf')
 log = logging.getLogger(__name__)
 log.info("Log rotation setup successfully!")
@@ -28,7 +30,7 @@ log.info("Log rotation setup successfully!")
 # Configuration
 CONFIG = {
     "PI_DATAPOINTS_FILE": "/etc/tedge/c8y/datapoints.json",
-    "MQTT_BROKER": "host.containers.internal",
+    "MQTT_BROKER": "host.docker.internal",
     "MQTT_PORT": 1883,
     "HTTP_PORT": 8001,
     "MQTT_MEASUREMENT_TOPIC": "c8y/measurement/measurements/create",
