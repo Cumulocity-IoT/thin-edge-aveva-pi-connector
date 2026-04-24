@@ -1,4 +1,7 @@
 {
     "RECORDING_AT_TIME": "?time=",
-    "POLL_INTERVAL": 90
+    "POLL_INTERVAL": 90,
+    "PI_USER": "default_user",
+    "PI_PASSWORD": "default_password-base64-encoded",
+    "PI_URL": "https://{{PI_URL}}/piwebapi"
 }
