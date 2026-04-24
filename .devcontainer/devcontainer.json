@@ -3,7 +3,7 @@
   "dockerFile": "Dockerfile",
 
   "runArgs": [
-    "--add-host=host.docker.internal:host-gateway"
+    "--add-host=host.containers.internal:host-gateway"
   ],
 
   "mounts": [
