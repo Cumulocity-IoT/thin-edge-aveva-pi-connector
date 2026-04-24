@@ -3,7 +3,7 @@
 A Python-based service for [Thin Edge](https://thin-edge.io/) designed to read data from the AVEVA PI System and publish it to an MQTT broker. The application also supports live configuration updates, enabling runtime changes without the need for a restart.
 
 ## Architecture Diagram
-![alt text](image.png)
+![alt text](Pi_Connector.png)
 
 ## Features
 
