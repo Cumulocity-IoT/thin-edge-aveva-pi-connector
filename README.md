@@ -97,7 +97,7 @@ Make sure the following are in place before proceeding:
 Download the latest stable build directly from GitHub Releases:
 
 **Latest Release:**  
-https://github.com/Cumulocity-IoT/thinedge-oci-connector/releases
+[repo release](https://github.com/Cumulocity-IoT/thin-edge-aveva-pi-connector/releases)
 
 Download the latest `.zip` package and deploy it to your target environment.
 
@@ -110,12 +110,16 @@ If you prefer to build the package manually, follow the steps below.
 1. **Clone the repository**
 
 ```bash
-git clone https://your-repo-url.git
+git clone https://github.com/Cumulocity-IoT/thin-edge-aveva-pi-connector.git
 ```
 2. **Create deployable file**
 
 ```bash
-zip -r package_name.zip . -x "config/*" "scripts/*"
+    zip "$ZIP_NAME" \
+            app.py \
+            docker-compose.yaml \
+            Dockerfile \
+            requirements.txt
 ```
 ## Deployment Instructions
 
