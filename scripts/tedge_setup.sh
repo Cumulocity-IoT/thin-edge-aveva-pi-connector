@@ -122,15 +122,9 @@ install() {
 
 
     # Configure HTTP proxy and open firewall port
-    log "Configuring HTTP proxy for Cumulocity mapper..."
-    sudo tedge config set c8y.proxy.client.host 0.0.0.0 || warn "Failed to set c8y.proxy.client.host. Continuing."
-    
-    if command -v ufw &> /dev/null; then
-        log "Allowing port 8001/tcp through UFW firewall..."
-        sudo ufw allow 8001/tcp || warn "Failed to add UFW rule for port 8001/tcp. It might already be open or UFW is not active."
-    else
-        warn "UFW (Uncomplicated Firewall) not found. Skipping firewall configuration for port 8001/tcp."
-    fi
+    log "Configuring HTTP proxy bind address for Cumulocity mapper..."
+    sudo tedge config set c8y.proxy.bind.address 0.0.0.0 || warn "Failed to set c8y.proxy.bind.address. Continuing."
+
     
     log "Restarting tedge c8y service..."
     sudo tedge reconnect c8y || warn "Failed to restart tedge c8y service. Please check the service status."
