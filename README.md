@@ -39,6 +39,10 @@ The following configuration files must be uploaded to the Cumulocity tenant for 
         "78FIQ301.A",
         "78FIC102.A"
     ]
+    ```
+Upload the above configuration files into Cumulocity-> Configuration Management tab, like below.
+
+![alt text](image-1.png)
 ### Configuration via Thin Edge
 
 Update your `tedge-configuration-plugin` to include the configuration files:
@@ -71,9 +75,6 @@ mode = 0o644
 ```
 Push these configurations from Cumulocity Device Management under the Configuration tab of the Thin Edge device.
 
-Upload the below configuration files into Cumulocity-> Configuration Management tab, like below.
-
-![alt text](image-1.png)
 Sample pi_config.json
 ```
 {
