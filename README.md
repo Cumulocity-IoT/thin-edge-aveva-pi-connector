@@ -1,6 +1,6 @@
 # PI Historian Service
 
-A Python-based service for [Thin Edge](https://thin-edge.io/) designed to read data from the AVEVA PI System and publish it to an MQTT broker. The application also supports live configuration updates, enabling runtime changes without the need for a restart.
+A Python-based service for [thin-edge](https://thin-edge.io/) designed to read data from the AVEVA PI System using REST APIs and publish it to an MQTT broker via thine-edge. The application also supports live configuration updates, enabling runtime changes without the need for a restart.
 
 ## Architecture Diagram
 ![alt text](Pi_Connector.png)
@@ -71,6 +71,9 @@ mode = 0o644
 ```
 Push these configurations from Cumulocity Device Management under the Configuration tab of the Thin Edge device.
 
+Upload the below configuration files into Cumulocity-> Configuration Management tab, like below.
+
+![alt text](image-1.png)
 Sample pi_config.json
 ```
 {
@@ -95,7 +98,22 @@ Make sure the following are in place before proceeding:
 
 ---
 
-## Build Steps
+## Build Instructions
+
+### Option 1: Download Prebuilt Release (Recommended)
+
+Download the latest stable build directly from GitHub Releases:
+
+**Latest Release:**  
+https://github.com/Cumulocity-IoT/thinedge-oci-connector/releases
+
+Download the latest `.zip` package and deploy it to your target environment.
+
+---
+
+### Option 2: Build From Source
+
+If you prefer to build the package manually, follow the steps below.
 
 1. **Clone the repository**
 
@@ -105,7 +123,7 @@ git clone https://your-repo-url.git
 2. **Create deployable file**
 
 ```bash
-zip -r package_name.zip . -x "config/*" "config-management/*" "scripts/*"
+zip -r package_name.zip . -x "config/*" "scripts/*"
 ```
 ## Deployment Instructions
 
@@ -122,3 +140,29 @@ zip -r package_name.zip . -x "config/*" "config-management/*" "scripts/*"
 - Select the uploaded software package and version
 
 The container will be deployed and started automatically on the Thin Edge VM.
+
+## MIT License
+
+Copyright (c) 2026 Cumulocity-IoT
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+## Disclaimer
+AVEVA, PI System, and PI Server are trademarks or registered trademarks of AVEVA Group plc or its subsidiaries in the U.S. and other countries. This project is an independent open-source initiative and is not affiliated with, sponsored by, or endorsed by AVEVA.
+
