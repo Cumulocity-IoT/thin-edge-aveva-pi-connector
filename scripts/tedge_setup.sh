@@ -117,16 +117,8 @@ install() {
     sudo apt-get install -y tedge-container-plugin-ng || warn "tedge-container-plugin-ng installation failed. Continuing with setup."
 
     # Update Mosquitto listener to allow external connections
-    log "Updating Mosquitto listener to 0.0.0.0 and restarting service..."
-    # Use ! for in-place editing when `set -u` is active, or use a temp file.
-    # A safer approach for sed with variables and potential unset issues is to use a temporary file.
-    if sudo sed -i.bak 's/^listener 1883 127\.0\.0\.1/listener 1883 0.0.0.0/' /etc/tedge/mosquitto-conf/tedge-mosquitto.conf; then
-        log "Mosquitto configuration updated."
-    else
-        warn "Mosquitto config update failed. Manual intervention might be needed."
-    fi
-    sudo systemctl restart mosquitto || warn "Mosquitto restart failed. Check Mosquitto logs."
-    sudo systemctl enable mosquitto || warn "Failed to enable Mosquitto service at boot."
+    log "Updating MQTT bind Address to 0.0.0.0 to allow external connections..."
+    sudo tedge config set mqtt.bind.address 0.0.0.0 || warn "Failed to set mqtt.bind.address. Continuing."
 
 
     # Configure HTTP proxy and open firewall port
@@ -140,9 +132,8 @@ install() {
         warn "UFW (Uncomplicated Firewall) not found. Skipping firewall configuration for port 8001/tcp."
     fi
     
-    log "Restarting tedge-mapper-c8y service..."
-    sudo systemctl restart tedge-mapper-c8y || warn "tedge-mapper-c8y restart failed. Check service logs."
-    sudo systemctl enable tedge-mapper-c8y || warn "Failed to enable tedge-mapper-c8y service at boot."
+    log "Restarting tedge c8y service..."
+    sudo tedge reconnect c8y || warn "Failed to restart tedge c8y service. Please check the service status."
 
     # Publish Device Configuration (Supported Configurations)
     log "Publishing device configuration to Cumulocity IoT..."
@@ -164,13 +155,6 @@ EOF
 {
     "RECORDING_AT_TIME": "?time=",
     "POLL_INTERVAL": 90
-}
-EOF
-
-    sudo tee "$CONFIG_DIR/pihistorian_device_config.json" >/dev/null <<EOF
-{
-    "CATEGORY": "PIHistorian",
-    "KEY": "$DEVICE_EXTERNAL_ID"
 }
 EOF
 
