@@ -1,6 +1,6 @@
 # PI Historian Service
 
-A Python-based service for [thin-edge](https://thin-edge.io/) designed to read data from the AVEVA PI System using REST APIs and publish it to an MQTT broker via thine-edge. The application also supports live configuration updates, enabling runtime changes without the need for a restart.
+A Python-based service for [thin-edge](https://thin-edge.io/) designed to read data from the AVEVA PI System using REST APIs and publish it to an MQTT broker via thin-edge. The application also supports live configuration updates, enabling runtime changes without the need for a restart.
 
 ## Architecture Diagram
 ![alt text](Pi_Connector.png)
@@ -39,13 +39,14 @@ The following configuration files must be uploaded to the Cumulocity tenant for 
         "78FIQ301.A",
         "78FIC102.A"
     ]
-    ```
 Upload the above configuration files into Cumulocity-> Configuration Management tab, like below.
 
 ![alt text](image-1.png)
 ### Configuration via Thin Edge
 
-Update your `tedge-configuration-plugin` to include the configuration files upload into c8y configuration management:
+Update your `tedge-configuration-plugin` to include the configuration files uploaded to Cumulocity Configuration Management.
+
+In the plugin configuration, the `type` values (for example, `pi_datapoints`) are the Cumulocity configuration type identifiers mapped to the local file paths; they are not the filenames themselves.
 
 ```toml
 [[files]]
@@ -139,25 +140,7 @@ The container will be deployed and started automatically on the Thin Edge VM.
 
 ## MIT License
 
-Copyright (c) 2026 Cumulocity-IoT
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for full details.
 
 ## Disclaimer
 AVEVA, PI System, and PI Server are trademarks or registered trademarks of AVEVA Group plc or its subsidiaries in the U.S. and other countries. This project is an independent open-source initiative and is not affiliated with, sponsored by, or endorsed by AVEVA.
