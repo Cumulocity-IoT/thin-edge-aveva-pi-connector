@@ -45,7 +45,7 @@ Upload the above configuration files into Cumulocity-> Configuration Management 
 ![alt text](image-1.png)
 ### Configuration via Thin Edge
 
-Update your `tedge-configuration-plugin` to include the configuration files:
+Update your `tedge-configuration-plugin` to include the configuration files upload into c8y configuration management:
 
 ```toml
 [[files]]
@@ -73,19 +73,10 @@ user = "tedge"
 group = "tedge"
 mode = 0o644
 ```
-Push these configurations from Cumulocity Device Management under the Configuration tab of the Thin Edge device.
+First, push the `tedge-configuration-plugin` configuration file from Cumulocity Device Management under the Configuration tab of the Thin Edge device.
+After that, push the remaining configuration files such as `pi_config` and `pi_datapoints`.
 
-Sample pi_config.json
-```
-{
-    "RECORDING_AT_TIME": "?time=",
-    "POLL_INTERVAL": 90,
-    "PI_USER": "default_user",
-    "PI_PASSWORD": "default_password-base64-encoded",
-    "PI_URL": "https://default-url.com"
-}
 
-```
 ## Prerequisites
 
 Make sure the following are in place before proceeding:
