@@ -41,7 +41,7 @@ The following configuration files must be uploaded to the Cumulocity tenant for 
     ]
 Upload the above configuration files into Cumulocity-> Configuration Management tab, like below.
 
-![alt text](image-1.png)
+![Configuration Screenshot](configurations.png)
 ### Configuration via thin-edge
 
 Update your `tedge-configuration-plugin` to include the configuration files uploaded to Cumulocity Configuration Management.
@@ -74,8 +74,12 @@ user = "tedge"
 group = "tedge"
 mode = 0o644
 ```
-First, push the `tedge-configuration-plugin` configuration file from Cumulocity Device Management under the Configuration tab of the thin-edge device.
-After that, push the remaining configuration files such as `pi_config` and `pi_datapoints`.
+1. Push `tedge-configuration-plugin` configuration file first.
+2. Then push:
+   - `pi_config`
+   - `pi_datapoints`
+
+⚠️ The configuration plugin must be applied before deploying dependent configuration files.
 
 
 ## Prerequisites
@@ -122,7 +126,18 @@ git clone https://github.com/Cumulocity-IoT/thin-edge-aveva-pi-connector.git
             Dockerfile \
             requirements.txt
 ```
-## Deployment Instructions
+## Deploy Using Prebuilt Release
+
+1. Download the latest release from:
+   [thin-edge-aveva-pi-connector/releases](https://github.com/Cumulocity-IoT/thin-edge-aveva-pi-connector/releases)
+
+2. Unzip the package:
+   `unzip pi_connector_<version>.zip`
+
+3. Start the service:
+   `docker compose up -d`
+
+## production deployment via Cumulocity
 
 ### 1. Upload the Zipped Archive
 
@@ -137,6 +152,7 @@ git clone https://github.com/Cumulocity-IoT/thin-edge-aveva-pi-connector.git
 - Select the uploaded software package and version
 
 The container will be deployed and started automatically on the thin-edge VM.
+
 
 ## MIT License
 
