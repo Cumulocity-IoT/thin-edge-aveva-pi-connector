@@ -1,9 +1,9 @@
 # PI Historian Service
 
-A Python-based service for [Thin Edge](https://thin-edge.io/) designed to read data from the AVEVA PI System and publish it to an MQTT broker. The application also supports live configuration updates, enabling runtime changes without the need for a restart.
+A Python-based service for [thin-edge](https://thin-edge.io/) designed to read data from the AVEVA PI System using REST APIs and publish it to an MQTT broker via thin-edge. The application also supports live configuration updates, enabling runtime changes without the need for a restart.
 
 ## Architecture Diagram
-![alt text](image.png)
+![alt text](Pi_Connector.png)
 
 ## Features
 
@@ -39,9 +39,14 @@ The following configuration files must be uploaded to the Cumulocity tenant for 
         "78FIQ301.A",
         "78FIC102.A"
     ]
-### Configuration via Thin Edge
+Upload the above configuration files into Cumulocity-> Configuration Management tab, like below.
 
-Update your `tedge-configuration-plugin` to include the configuration files:
+![Configuration Screenshot](configurations.png)
+### Configuration via thin-edge
+
+Update your `tedge-configuration-plugin` to include the configuration files uploaded to Cumulocity Configuration Management.
+
+In the plugin configuration, the `type` values (for example, `pi_datapoints`) are the Cumulocity configuration type identifiers mapped to the local file paths; they are not the filenames themselves.
 
 ```toml
 [[files]]
@@ -69,25 +74,20 @@ user = "tedge"
 group = "tedge"
 mode = 0o644
 ```
-Push these configurations from Cumulocity Device Management under the Configuration tab of the Thin Edge device.
+1. Push `tedge-configuration-plugin` configuration file first.
+2. Then push:
+   - `pi_config`
+   - `pi_datapoints`
 
-Sample pi_config.json
-```
-{
-    "RECORDING_AT_TIME": "?time=",
-    "POLL_INTERVAL": 90,
-    "PI_USER": "default_user",
-    "PI_PASSWORD": "default_password-base64-encoded",
-    "PI_URL": "https://default-url.com"
-}
+⚠️ The configuration plugin must be applied before deploying dependent configuration files.
 
-```
+
 ## Prerequisites
 
 Make sure the following are in place before proceeding:
 
-- Thin Edge installed and connected to the Cumulocity tenant
-- Device registered as a Thin Edge device
+- thin-edge installed and connected to the Cumulocity tenant
+- Device registered as a thin-edge device
 - Docker installed on the target VM
 - Container group feature installed on the device
 - Mosquitto broker exposed for external communication
@@ -95,19 +95,49 @@ Make sure the following are in place before proceeding:
 
 ---
 
-## Build Steps
+## Build Instructions
+
+### Option 1: Download Prebuilt Release (Recommended)
+
+Download the latest stable build directly from GitHub Releases:
+
+**Latest Release:**  
+[repo release](https://github.com/Cumulocity-IoT/thin-edge-aveva-pi-connector/releases)
+
+Download the latest `.zip` package and deploy it to your target environment.
+
+---
+
+### Option 2: Build From Source
+
+If you prefer to build the package manually, follow the steps below.
 
 1. **Clone the repository**
 
 ```bash
-git clone https://your-repo-url.git
+git clone https://github.com/Cumulocity-IoT/thin-edge-aveva-pi-connector.git
 ```
 2. **Create deployable file**
 
 ```bash
-zip -r package_name.zip . -x "config/*" "config-management/*" "scripts/*"
+    zip "$ZIP_NAME" \
+            app.py \
+            docker-compose.yaml \
+            Dockerfile \
+            requirements.txt
 ```
-## Deployment Instructions
+## Deploy Using Prebuilt Release
+
+1. Download the latest release from:
+   [thin-edge-aveva-pi-connector/releases](https://github.com/Cumulocity-IoT/thin-edge-aveva-pi-connector/releases)
+
+2. Unzip the package:
+   `unzip pi_connector_<version>.zip`
+
+3. Start the service:
+   `docker compose up -d`
+
+## production deployment via Cumulocity
 
 ### 1. Upload the Zipped Archive
 
@@ -115,10 +145,25 @@ zip -r package_name.zip . -x "config/*" "config-management/*" "scripts/*"
 - Upload the `.zip` file
 - Set the **Software Type** to `container-group`
 
-### 2. Deploy to Thin Edge Device
+### 2. Deploy to thin-edge Device
 
-- Navigate to the target **Thin Edge device** in Cumulocity Device Management
+- Navigate to the target **thin-edge device** in Cumulocity Device Management
 - Go to **Software > Install**
 - Select the uploaded software package and version
 
-The container will be deployed and started automatically on the Thin Edge VM.
+The container will be deployed and started automatically on the thin-edge VM.
+
+
+## MIT License
+
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for full details.
+
+## Disclaimer
+AVEVA, PI System, and PI Server are trademarks or registered trademarks of AVEVA Group plc or its subsidiaries in the U.S. and other countries. This project is an independent open-source initiative and is not affiliated with, sponsored by, or endorsed by AVEVA.
+
+-------------------------------------------
+These tools are provided as-is and without warranty or support. They do not constitute part of the Cumulocity product suite. Users are free to use, fork and modify them, subject to the license agreement. While Cumulocity GmbH welcomes contributions, we cannot guarantee to include every contribution in the master project.
+
+----------------------------------
+You can find additional information in the [Cumulocity Community](https://community.cumulocity.com/).
+

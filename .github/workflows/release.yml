@@ -17,20 +17,19 @@ jobs:
         id: vars
         run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
-      - name: Create ZIP package (exclude directories)
+      - name: Create ZIP package (include only required files)
         id: zip
         run: |
           ZIP_NAME="pi_connector_${{ steps.vars.outputs.version }}.zip"
-          zip -r "$ZIP_NAME" . \
-            -x "config/*" \
-            -x "config-management/*" \
-            -x "scripts/*" \
-            -x ".git/*" \
-            -x ".github/*" \
-            -x "Pi_Connector.drawio" \
-            -x "image.png" \
-            -x "LICENSE" \
-            -x "README.md"
+
+          cd $GITHUB_WORKSPACE
+
+          zip "$ZIP_NAME" \
+            app.py \
+            docker-compose.yaml \
+            Dockerfile \
+            requirements.txt
+
           echo "zip_name=$ZIP_NAME" >> $GITHUB_OUTPUT
 
       - name: Upload artifact
