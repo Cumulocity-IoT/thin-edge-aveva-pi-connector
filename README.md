@@ -42,7 +42,7 @@ The following configuration files must be uploaded to the Cumulocity tenant for 
 Upload the above configuration files into Cumulocity-> Configuration Management tab, like below.
 
 ![alt text](image-1.png)
-### Configuration via Thin Edge
+### Configuration via thin-edge
 
 Update your `tedge-configuration-plugin` to include the configuration files uploaded to Cumulocity Configuration Management.
 
@@ -74,7 +74,7 @@ user = "tedge"
 group = "tedge"
 mode = 0o644
 ```
-First, push the `tedge-configuration-plugin` configuration file from Cumulocity Device Management under the Configuration tab of the Thin Edge device.
+First, push the `tedge-configuration-plugin` configuration file from Cumulocity Device Management under the Configuration tab of the thin-edge device.
 After that, push the remaining configuration files such as `pi_config` and `pi_datapoints`.
 
 
@@ -82,8 +82,8 @@ After that, push the remaining configuration files such as `pi_config` and `pi_d
 
 Make sure the following are in place before proceeding:
 
-- Thin Edge installed and connected to the Cumulocity tenant
-- Device registered as a Thin Edge device
+- thin-edge installed and connected to the Cumulocity tenant
+- Device registered as a thin-edge device
 - Docker installed on the target VM
 - Container group feature installed on the device
 - Mosquitto broker exposed for external communication
@@ -130,13 +130,13 @@ git clone https://github.com/Cumulocity-IoT/thin-edge-aveva-pi-connector.git
 - Upload the `.zip` file
 - Set the **Software Type** to `container-group`
 
-### 2. Deploy to Thin Edge Device
+### 2. Deploy to thin-edge Device
 
-- Navigate to the target **Thin Edge device** in Cumulocity Device Management
+- Navigate to the target **thin-edge device** in Cumulocity Device Management
 - Go to **Software > Install**
 - Select the uploaded software package and version
 
-The container will be deployed and started automatically on the Thin Edge VM.
+The container will be deployed and started automatically on the thin-edge VM.
 
 ## MIT License
 
