@@ -27,10 +27,12 @@ jobs:
         id: vars
         run: |
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+            RAW="${{ github.event.inputs.version }}"
           else
-            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+            RAW="${GITHUB_REF#refs/tags/}"
           fi
+          # Strip leading 'v' for use in filenames
+          echo "version=${RAW#v}" >> $GITHUB_OUTPUT
 
       - name: Build standard ZIP
         id: zip
@@ -78,24 +80,16 @@ jobs:
           echo "version=${RAW#v}" >> $GITHUB_OUTPUT
           echo "tag=$RAW" >> $GITHUB_OUTPUT
 
-      - name: Build air-gap ZIP via build_release.sh
+      - name: Build offline ZIP via build_release.sh
         run: |
           chmod +x scripts/build_release.sh
           scripts/build_release.sh ${{ steps.vars.outputs.version }}
 
-      - name: Rename ZIP with airgap suffix
-        id: zip
-        run: |
-          SRC="pi_historian_connector_${{ steps.vars.outputs.version }}.zip"
-          DST="pi_historian_connector_${{ steps.vars.outputs.tag }}_offline.zip"
-          mv "$SRC" "$DST"
-          echo "zip_name=$DST" >> $GITHUB_OUTPUT
-
-      - name: Upload air-gap artifact
+      - name: Upload offline artifact
         uses: actions/upload-artifact@v4
         with:
           name: offline-release
-          path: ${{ steps.zip.outputs.zip_name }}
+          path: pi_historian_connector_v${{ steps.vars.outputs.version }}_offline.zip
 
   # ─────────────────────────────────────────────────────────
   # Job 3: Publish both ZIPs to GitHub Release
@@ -111,7 +105,7 @@ jobs:
         with:
           name: standard-release
 
-      - name: Download air-gap artifact
+      - name: Download offline artifact
         uses: actions/download-artifact@v4
         with:
           name: offline-release
