@@ -53,8 +53,8 @@ jobs:
   # ─────────────────────────────────────────────────────────
   # Job 2: Air-gap release — Docker image + wheels bundled
   # ─────────────────────────────────────────────────────────
-  build-airgap:
-    name: "Air-gap Release (offline install)"
+  build-offline:
+    name: "Offline Release"
     runs-on: ubuntu-latest
 
     steps:
@@ -87,14 +87,14 @@ jobs:
         id: zip
         run: |
           SRC="pi_historian_connector_${{ steps.vars.outputs.version }}.zip"
-          DST="pi_historian_connector_${{ steps.vars.outputs.tag }}_airgap.zip"
+          DST="pi_historian_connector_${{ steps.vars.outputs.tag }}_offline.zip"
           mv "$SRC" "$DST"
           echo "zip_name=$DST" >> $GITHUB_OUTPUT
 
       - name: Upload air-gap artifact
         uses: actions/upload-artifact@v4
         with:
-          name: airgap-release
+          name: offline-release
           path: ${{ steps.zip.outputs.zip_name }}
 
   # ─────────────────────────────────────────────────────────
@@ -103,7 +103,7 @@ jobs:
   publish-release:
     name: "Publish GitHub Release"
     runs-on: ubuntu-latest
-    needs: [build-standard, build-airgap]
+    needs: [build-standard, build-offline]
 
     steps:
       - name: Download standard artifact
@@ -114,7 +114,7 @@ jobs:
       - name: Download air-gap artifact
         uses: actions/download-artifact@v4
         with:
-          name: airgap-release
+          name: offline-release
 
       - name: Extract tag for release
         id: vars
@@ -139,9 +139,9 @@ jobs:
             | File | Description |
             |---|---|
             | `*_online.zip` | Standard release — requires internet on the target device to pull the Docker image |
-            | `*_airgap.zip` | Air-gap release — includes pre-built Docker image tarball and pip wheels for fully offline deployment |
+            | `*_offline.zip` | Offline release — includes pre-built Docker image tarball and pip wheels for fully offline deployment |
 
             See [README](https://github.com/${{ github.repository }}/blob/main/README.md) for installation instructions.
           files: |
             *_online.zip
-            *_airgap.zip
+            *_offline.zip

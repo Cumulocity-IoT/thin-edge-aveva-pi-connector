@@ -109,7 +109,7 @@ Two release assets are published for each version:
 | Asset | Description |
 |---|---|
 | `pi_historian_connector_<version>_online.zip` | Standard release — Docker image is pulled from Docker Hub on first run. Requires internet on the target device. |
-| `pi_historian_connector_<version>_airgap.zip` | Air-gap release — includes a pre-built Docker image tarball and pip wheels. No internet required on the target device. |
+| `pi_historian_connector_<version>_offline.zip` | Offline release — includes a pre-built Docker image tarball and pip wheels. No internet required on the target device. |
 
 ---
 
@@ -133,7 +133,7 @@ The script will:
 3. Build the Docker image locally
 4. Export the image as a `.tar.gz` tarball
 5. Generate an airgap `docker-compose.yaml` with the correct image reference
-6. Bundle everything into `pi_historian_connector_v0.0.4_airgap.zip`
+6. Bundle everything into `pi_historian_connector_v0.0.4_offline.zip`
 7. Clean up all temporary files and staging directories
 
 The release CI (`release.yml`) runs the same script automatically on every tag push (`v*`) and can also be triggered manually via **Actions → Build and Upload ZIP Release → Run workflow**.
@@ -156,9 +156,9 @@ The release CI (`release.yml`) runs the same script automatically on every tag p
 
 ---
 
-## Offline / Air-gap Installation
+## Offline Installation
 
-Use this procedure when the target device has **no internet access**. Download the `*_airgap.zip` from [releases](https://github.com/Cumulocity-IoT/thin-edge-aveva-pi-connector/releases) or build it yourself using `scripts/build_release.sh`.
+Use this procedure when the target device has **no internet access**. Download the `*_offline.zip` from [releases](https://github.com/Cumulocity-IoT/thin-edge-aveva-pi-connector/releases) or build it using `scripts/build_release.sh`.
 
 ### Prerequisites on the target device
 
@@ -168,16 +168,16 @@ Use this procedure when the target device has **no internet access**. Download t
 
 ### Step 1 — Transfer the release bundle
 
-Copy the `*_airgap.zip` to the target device via USB, SCP, or any other transfer method:
+Copy the `*_offline.zip` to the target device via USB, SCP, or any other transfer method:
 
 ```bash
-scp pi_historian_connector_v0.0.4_airgap.zip user@<device-ip>:/home/user/
+scp pi_historian_connector_v0.0.4_offline.zip user@<device-ip>:/home/user/
 ```
 
 ### Step 2 — Unzip the bundle
 
 ```bash
-unzip pi_historian_connector_v0.0.4_airgap.zip -d pi_historian_connector_v0.0.4
+unzip pi_historian_connector_v0.0.4_offline.zip -d pi_historian_connector_v0.0.4
 cd pi_historian_connector_v0.0.4
 ```
 
