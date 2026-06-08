@@ -4,43 +4,144 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g. v0.0.4)"
+        required: true
+        default: "v0.0.4"
 
 jobs:
-  build-release:
+  # ─────────────────────────────────────────────────────────
+  # Job 1: Standard (online) release — source + compose only
+  # ─────────────────────────────────────────────────────────
+  build-standard:
+    name: "Standard Release (online install)"
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Extract version from tag
+      - name: Extract version
         id: vars
-        run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
 
-      - name: Create ZIP package (include only required files)
+      - name: Build standard ZIP
         id: zip
         run: |
-          ZIP_NAME="pi_connector_${{ steps.vars.outputs.version }}.zip"
-
-          cd $GITHUB_WORKSPACE
-
+          ZIP_NAME="pi_historian_connector_${{ steps.vars.outputs.version }}_online.zip"
           zip "$ZIP_NAME" \
             app.py \
             docker-compose.yaml \
             Dockerfile \
+            logging.conf \
             requirements.txt
-
           echo "zip_name=$ZIP_NAME" >> $GITHUB_OUTPUT
 
-      - name: Upload artifact
+      - name: Upload standard artifact
         uses: actions/upload-artifact@v4
         with:
-          name: pi-connector-zip
+          name: standard-release
           path: ${{ steps.zip.outputs.zip_name }}
 
-      - name: Create GitHub Release and upload ZIP
+  # ─────────────────────────────────────────────────────────
+  # Job 2: Air-gap release — Docker image + wheels bundled
+  # ─────────────────────────────────────────────────────────
+  build-airgap:
+    name: "Air-gap Release (offline install)"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Extract version
+        id: vars
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            RAW="${{ github.event.inputs.version }}"
+          else
+            RAW="${GITHUB_REF#refs/tags/}"
+          fi
+          # Strip leading 'v' for use as a semver in image tags / filenames
+          echo "version=${RAW#v}" >> $GITHUB_OUTPUT
+          echo "tag=$RAW" >> $GITHUB_OUTPUT
+
+      - name: Build air-gap ZIP via build_release.sh
+        run: |
+          chmod +x scripts/build_release.sh
+          scripts/build_release.sh ${{ steps.vars.outputs.version }}
+
+      - name: Rename ZIP with airgap suffix
+        id: zip
+        run: |
+          SRC="pi_historian_connector_${{ steps.vars.outputs.version }}.zip"
+          DST="pi_historian_connector_${{ steps.vars.outputs.tag }}_airgap.zip"
+          mv "$SRC" "$DST"
+          echo "zip_name=$DST" >> $GITHUB_OUTPUT
+
+      - name: Upload air-gap artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: airgap-release
+          path: ${{ steps.zip.outputs.zip_name }}
+
+  # ─────────────────────────────────────────────────────────
+  # Job 3: Publish both ZIPs to GitHub Release
+  # ─────────────────────────────────────────────────────────
+  publish-release:
+    name: "Publish GitHub Release"
+    runs-on: ubuntu-latest
+    needs: [build-standard, build-airgap]
+
+    steps:
+      - name: Download standard artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: standard-release
+
+      - name: Download air-gap artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: airgap-release
+
+      - name: Extract tag for release
+        id: vars
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "tag=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create GitHub Release and upload ZIPs
         uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          files: ${{ steps.zip.outputs.zip_name }}
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: "PI Historian Connector ${{ steps.vars.outputs.tag }}"
+          body: |
+            ## PI Historian Connector ${{ steps.vars.outputs.tag }}
+
+            ### Assets
+            | File | Description |
+            |---|---|
+            | `*_online.zip` | Standard release — requires internet on the target device to pull the Docker image |
+            | `*_airgap.zip` | Air-gap release — includes pre-built Docker image tarball and pip wheels for fully offline deployment |
+
+            See [README](https://github.com/${{ github.repository }}/blob/main/README.md) for installation instructions.
+          files: |
+            *_online.zip
+            *_airgap.zip
