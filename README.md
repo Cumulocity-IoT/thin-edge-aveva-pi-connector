@@ -13,6 +13,7 @@ A Python-based service for [thin-edge](https://thin-edge.io/) designed to read d
 - Structured MQTT message publishing
 - Real-time monitoring of configuration file changes
 - Dynamic reconfiguration without service restart
+- Application logs written to `/etc/tedge/c8y/logs/` (persisted on host via volume mount, daily rotation)
 
 ## Requirements
 
@@ -95,7 +96,7 @@ Make sure the following are in place before proceeding:
 - Mosquitto broker exposed for external communication
 - `unzip` package installed on the device
 
-> **Automated setup:** `scripts/tedge_setup.sh` handles thin-edge installation, device registration, certificate download, MQTT configuration, and PI connector prerequisites in a single command. See [scripts/README.md](scripts/README.md) for full instructions.
+> **Automated setup:** `scripts/tedge_setup.sh` handles thin-edge installation, device registration (via OTP), certificate download, MQTT configuration, and PI connector prerequisites in a single command. Accepts Cumulocity domain with or without the `https://` prefix. See [scripts/README.md](scripts/README.md) for full instructions.
 
 ### thin-edge MQTT configuration
 
@@ -202,8 +203,8 @@ cd pi_historian_connector_v0.0.4
 The zip extracts files directly at the top level:
 
 ```
-docker-compose.yaml                            # airgap service definition (pre-configured)
-logging.conf                                   # logging configuration
+docker-compose.yaml                            # offline service definition (pre-configured)
+logging.conf                                   # logging configuration (writes to /etc/tedge/c8y/logs/)
 requirements.txt                               # Python dependencies (reference only)
 pi_historian_connector_0.0.4.tar.gz            # pre-built Docker image tarball
 packages/                                      # pip wheels for offline pip install
@@ -233,12 +234,16 @@ pi_historian_connector   0.0.4   <id>   ...
 
 ### Step 4 — Ensure config files are in place
 
-The service mounts `/etc/tedge/c8y` — make sure the following files exist on the device before starting:
+The service mounts `/etc/tedge/c8y` for both configuration and log output. Make sure the following files exist on the device before starting:
 
 ```
 /etc/tedge/c8y/pi_config.json
 /etc/tedge/c8y/datapoints.json
 ```
+
+Application logs are written to `/etc/tedge/c8y/logs/pi_historian.log` on the host (rotated daily, 3 days retained).
+
+> These config files are created automatically by `scripts/tedge_setup.sh install` — see [scripts/README.md](scripts/README.md).
 
 See the [Configuration](#configuration) section for the expected file formats.
 

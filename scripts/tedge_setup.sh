@@ -60,14 +60,18 @@ install_deb() {
         local deb_file
         deb_file=$(find "$PACKAGES_DIR" -maxdepth 1 -name "$deb_glob" | sort -V | tail -1)
         if [[ -z "$deb_file" ]]; then
-            error_exit "Offline install: cannot find '${deb_glob}' in ${PACKAGES_DIR}/"
+            error_exit "Offline install failed: '${deb_glob}' not found in ${PACKAGES_DIR}/. Copy the required .deb file and retry."
         fi
         log "Installing ${pkg_name} from local package: $(basename "$deb_file")..."
-        sudo dpkg -i "$deb_file" || sudo apt-get install -f -y || error_exit "Failed to install ${pkg_name}"
+        if ! sudo dpkg -i "$deb_file"; then
+            log "dpkg reported dependency issues — attempting to fix with apt-get install -f..."
+            sudo apt-get install -f -y || error_exit "Failed to install ${pkg_name} (offline). Check that all dependency .deb files are present in ${PACKAGES_DIR}/."
+        fi
     else
         log "Installing ${pkg_name} from apt..."
-        sudo apt-get install -y "$pkg_name" || error_exit "Failed to install ${pkg_name}"
+        sudo apt-get install -y "$pkg_name" || error_exit "Failed to install ${pkg_name} (online). Check your internet connection and apt repository configuration."
     fi
+    log "${pkg_name} installed successfully."
 }
 
 # ========== Install Function ==========
@@ -78,6 +82,10 @@ install() {
 
     # User Inputs
     CUMULOCITY_DOMAIN=$(prompt_input "Enter your Cumulocity domain" "your-tenant.cumulocity.com")
+    # Strip protocol prefix and trailing slash — tedge expects domain only (e.g. tenant.cumulocity.com)
+    CUMULOCITY_DOMAIN="${CUMULOCITY_DOMAIN#https://}"
+    CUMULOCITY_DOMAIN="${CUMULOCITY_DOMAIN#http://}"
+    CUMULOCITY_DOMAIN="${CUMULOCITY_DOMAIN%/}"
     DEVICE_EXTERNAL_ID=$(prompt_input "Enter thin-edge device external Id" "tedge-device-01")
     read -rp "Enter the One-Time Password (OTP) from Cumulocity Device Registration: " ENROLLMENT_OTP; echo
     [[ -z "$ENROLLMENT_OTP" ]] && error_exit "OTP cannot be empty. Generate it in Cumulocity → Device Management → Registration."
@@ -121,12 +129,18 @@ install() {
 
     # Connect ThinEdge.io to Cumulocity IoT
     log "Connecting ThinEdge.io to Cumulocity IoT..."
-    sudo tedge connect c8y || error_exit "Failed to connect ThinEdge.io to Cumulocity"
+    if connect_output=$(sudo tedge connect c8y 2>&1); then
+        echo "$connect_output"
+    elif echo "$connect_output" | grep -q "already established"; then
+        warn "thin-edge is already connected to Cumulocity — skipping connect."
+    else
+        echo "$connect_output" >&2
+        error_exit "Failed to connect ThinEdge.io to Cumulocity"
+    fi
 
     # Install ThinEdge Container Plugin (Next Generation)
     log "Installing tedge-container-plugin-ng..."
-    install_deb "tedge-container-plugin-ng" "tedge-container-plugin-ng_*.deb" \
-        || warn "tedge-container-plugin-ng installation failed. Continuing with setup."
+    install_deb "tedge-container-plugin-ng" "tedge-container-plugin-ng_*.deb"
 
     # Load PI Historian Docker image (offline mode only)
     if [[ "$OFFLINE" == "true" ]]; then

@@ -74,7 +74,6 @@ services:
 
     volumes:
       - /etc/tedge/c8y:/etc/tedge/c8y
-      - ./logs:/app/logs
 
     working_dir: /app
     command: ["python", "app.py"]
