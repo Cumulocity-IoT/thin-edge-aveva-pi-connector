@@ -21,7 +21,7 @@ from paho.mqtt.client import CallbackAPIVersion
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Setup Logging
-LOG_DIR = "logs"
+LOG_DIR = "/etc/tedge/c8y/logs"
 os.makedirs(LOG_DIR, exist_ok=True)
 logging.config.fileConfig('logging.conf')
 log = logging.getLogger(__name__)
