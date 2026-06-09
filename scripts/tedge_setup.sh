@@ -2,16 +2,34 @@
 
 # This script automates the installation and uninstallation of ThinEdge.io
 # on a Debian-based system, connecting it to Cumulocity IoT.
+#
+# Usage:
+#   ./tedge_setup.sh install           # online — downloads packages from internet
+#   ./tedge_setup.sh install --offline # offline — installs from local .deb files
+#   ./tedge_setup.sh uninstall
+#
+# Offline mode expects the following files in ./packages/ (relative to this script):
+#   tedge-full_*.deb
+#   tedge-container-plugin-ng_*.deb
+# And the PI Historian connector offline ZIP unpacked in the same directory:
+#   docker-compose.yaml
+#   pi_historian_connector_*.tar.gz
 
 set -euo pipefail # Exit immediately if a command exits with a non-zero status.
                   # Exit if any unset variables are used.
                   # Exit if a command in a pipeline fails.
 
 ACTION=${1:-}
+OFFLINE=false
+[[ "${2:-}" == "--offline" ]] && OFFLINE=true
+
+# Directory containing this script (used to locate offline packages)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PACKAGES_DIR="${SCRIPT_DIR}/packages"
 
 # Check if an action is provided
 if [[ -z "$ACTION" ]]; then
-    echo "Usage: $0 [install|uninstall]"
+    echo "Usage: $0 [install|uninstall] [--offline]"
     exit 1
 fi
 
@@ -30,49 +48,66 @@ prompt_input() {
     echo "${user_input:-$default_val}"
 }
 
-# ========== Function: Create EST Registration File ==========
-create_est_registration_file() {
-    local otp="$1"
-    local device_id_param="$2" # Use the passed device_id
+# ========== Package Install Helper ==========
+# install_deb <package-name> <glob-pattern-for-local-deb>
+# In offline mode: installs from local .deb matching the glob under PACKAGES_DIR.
+# In online mode: installs via apt-get.
+install_deb() {
+    local pkg_name="$1"
+    local deb_glob="$2"
 
-    log "Generating ESTRegistrationFile.csv with OTP for device: $device_id_param"
-
-    sudo tee "$CONFIG_DIR/ESTRegistrationFile.csv" >/dev/null <<EOF
-ID;TYPE;NAME;ICCID;IDTYPE;PATH;SHELL;AUTH_TYPE;ENROLLMENT_OTP
-$device_id_param;;;;;;;CERTIFICATES;$otp
-EOF
-
-    sudo chown tedge:tedge "$CONFIG_DIR/ESTRegistrationFile.csv" || error_exit "Failed to change ownership of ESTRegistrationFile.csv"
-    sudo chmod 644 "$CONFIG_DIR/ESTRegistrationFile.csv" || error_exit "Failed to set permissions for ESTRegistrationFile.csv"
-
-    log "File created at $CONFIG_DIR/ESTRegistrationFile.csv"
+    if [[ "$OFFLINE" == "true" ]]; then
+        local deb_file
+        deb_file=$(find "$PACKAGES_DIR" -maxdepth 1 -name "$deb_glob" | sort -V | tail -1)
+        if [[ -z "$deb_file" ]]; then
+            error_exit "Offline install failed: '${deb_glob}' not found in ${PACKAGES_DIR}/. Copy the required .deb file and retry."
+        fi
+        log "Installing ${pkg_name} from local package: $(basename "$deb_file")..."
+        if ! sudo dpkg -i "$deb_file"; then
+            log "dpkg reported dependency issues — attempting to fix with apt-get install -f..."
+            sudo apt-get install -f -y || error_exit "Failed to install ${pkg_name} (offline). Check that all dependency .deb files are present in ${PACKAGES_DIR}/."
+        fi
+    else
+        log "Installing ${pkg_name} from apt..."
+        sudo apt-get install -y "$pkg_name" || error_exit "Failed to install ${pkg_name} (online). Check your internet connection and apt repository configuration."
+    fi
+    log "${pkg_name} installed successfully."
 }
 
 # ========== Install Function ==========
 install() {
     echo "---- ThinEdge.io Device Installation ----"
+    [[ "$OFFLINE" == "true" ]] && log "Mode: OFFLINE (packages from ${PACKAGES_DIR}/)" \
+                                || log "Mode: ONLINE (packages from internet)"
 
-    # User Inputs - Centralized for clarity
-    CUMULOCITY_DOMAIN=$(prompt_input "Enter your Cumulocity domain" "Your cumulocity Tenant domain URL")
-    CUMULOCITY_TENANT=$(prompt_input "Enter your Cumulocity tenant" "Your Cumulocity tenant id")
-    CUMULOCITY_USER=$(prompt_input "Enter your Cumulocity Tenant User" "Your Cumulocity Tenant User name")
-    read -rsp "Enter your Cumulocity Tenant Password [will not show]: " CUMULOCITY_PASSWORD; echo
-    DEVICE_EXTERNAL_ID=$(prompt_input "Enter thin-edge external Id" "tedge-test-vm2")
-    VM_USER=$(prompt_input "Enter your VM user Id" "<Your VM user id>")
+    # User Inputs
+    CUMULOCITY_DOMAIN=$(prompt_input "Enter your Cumulocity domain" "your-tenant.cumulocity.com")
+    # Strip protocol prefix and trailing slash — tedge expects domain only (e.g. tenant.cumulocity.com)
+    CUMULOCITY_DOMAIN="${CUMULOCITY_DOMAIN#https://}"
+    CUMULOCITY_DOMAIN="${CUMULOCITY_DOMAIN#http://}"
+    CUMULOCITY_DOMAIN="${CUMULOCITY_DOMAIN%/}"
+    DEVICE_EXTERNAL_ID=$(prompt_input "Enter thin-edge device external Id" "tedge-device-01")
+    read -rp "Enter the One-Time Password (OTP) from Cumulocity Device Registration: " ENROLLMENT_OTP; echo
+    [[ -z "$ENROLLMENT_OTP" ]] && error_exit "OTP cannot be empty. Generate it in Cumulocity → Device Management → Registration."
 
     # Directories
-    readonly CERT_DIR="/etc/tedge/device-certs"
-    readonly CONFIG_DIR="/etc/tedge/c8y"
+    CERT_DIR="/etc/tedge/device-certs"
+    CONFIG_DIR="/etc/tedge/c8y"
 
-    # Add ThinEdge repositories
-    log "Adding ThinEdge repositories..."
-    curl -1sLf 'https://dl.cloudsmith.io/public/thinedge/tedge-release/setup.deb.sh' | sudo -E bash || error_exit "Failed to add tedge-release repository"
-    curl -1sLf 'https://dl.cloudsmith.io/public/thinedge/community/setup.deb.sh' | sudo -E bash || error_exit "Failed to add tedge-community repository"
+    if [[ "$OFFLINE" == "true" ]]; then
+        log "Offline mode: skipping repository setup."
+        [[ -d "$PACKAGES_DIR" ]] || error_exit "Packages directory not found: ${PACKAGES_DIR}/"
+    else
+        # Add ThinEdge repositories
+        log "Adding ThinEdge repositories..."
+        curl -1sLf 'https://dl.cloudsmith.io/public/thinedge/tedge-release/setup.deb.sh' | sudo -E bash || error_exit "Failed to add tedge-release repository"
+        curl -1sLf 'https://dl.cloudsmith.io/public/thinedge/community/setup.deb.sh' | sudo -E bash || error_exit "Failed to add tedge-community repository"
+        log "Updating apt cache..."
+        sudo apt-get update || error_exit "Failed to update apt cache"
+    fi
 
-    # Install ThinEdge.io and its dependencies
-    log "Updating apt cache and installing ThinEdge.io..."
-    sudo apt-get update || error_exit "Failed to update apt cache"
-    sudo apt-get install -y tedge-full || error_exit "ThinEdge.io installation failed"
+    # Install ThinEdge.io
+    install_deb "tedge-full" "tedge-full_*.deb"
 
     # Configure Cumulocity URL
     log "Configuring Cumulocity URL: $CUMULOCITY_DOMAIN"
@@ -84,37 +119,40 @@ install() {
     sudo chown tedge:tedge "$CERT_DIR" "$CONFIG_DIR" || error_exit "Failed to change ownership of tedge directories"
     sudo chmod 755 "$CERT_DIR" "$CONFIG_DIR" || error_exit "Failed to set permissions for tedge directories"
 
-    # Generate OTP and EST Registration File
-    log "Generating One-Time Password for device registration..."
-    ENROLLMENT_OTP=$(head /dev/urandom | tr -dc A-Za-z0-9@#%! | head -c 12 ; echo '') # Safer OTP generation
-    create_est_registration_file "$ENROLLMENT_OTP" "$DEVICE_EXTERNAL_ID"
-
-    # Register device in Cumulocity IoT
-    log "Registering device '$DEVICE_EXTERNAL_ID' in Cumulocity IoT..."
-    AUTH_CREDENTIALS="${CUMULOCITY_TENANT}/${CUMULOCITY_USER}:${CUMULOCITY_PASSWORD}"
-    AUTH_HEADER=$(printf "%s" "$AUTH_CREDENTIALS" | base64 --wrap=0) # --wrap=0 for no line breaks
-    
-    curl_output=$(curl -s -X POST \
-        -H "Authorization: Basic $AUTH_HEADER" \
-        -F "file=@$CONFIG_DIR/ESTRegistrationFile.csv;type=text/csv" \
-        "https://$CUMULOCITY_DOMAIN/devicecontrol/bulkNewDeviceRequests" || error_exit "Failed to register device with Cumulocity")
-
-    if echo "$curl_output" | grep -q "error"; then
-        error_exit "Cumulocity device registration returned an error: $curl_output"
+    # Download device certificate only if it does not already exist
+    if sudo tedge cert show c8y &>/dev/null; then
+        warn "Device certificate already exists — skipping download."
+    else
+        log "Downloading device certificate for '$DEVICE_EXTERNAL_ID'..."
+        sudo tedge cert download c8y --device-id "$DEVICE_EXTERNAL_ID" --one-time-password "$ENROLLMENT_OTP" || error_exit "Failed to download device certificate"
     fi
-    log "Device registration request sent successfully."
-
-    # Download device certificate
-    log "Downloading device certificate for '$DEVICE_EXTERNAL_ID'..."
-    sudo tedge cert download c8y --device-id "$DEVICE_EXTERNAL_ID" --one-time-password "$ENROLLMENT_OTP" || error_exit "Failed to download device certificate"
 
     # Connect ThinEdge.io to Cumulocity IoT
     log "Connecting ThinEdge.io to Cumulocity IoT..."
-    sudo tedge connect c8y || error_exit "Failed to connect ThinEdge.io to Cumulocity"
+    if connect_output=$(sudo tedge connect c8y 2>&1); then
+        echo "$connect_output"
+    elif echo "$connect_output" | grep -q "already established"; then
+        warn "thin-edge is already connected to Cumulocity — skipping connect."
+    else
+        echo "$connect_output" >&2
+        error_exit "Failed to connect ThinEdge.io to Cumulocity"
+    fi
 
     # Install ThinEdge Container Plugin (Next Generation)
     log "Installing tedge-container-plugin-ng..."
-    sudo apt-get install -y tedge-container-plugin-ng || warn "tedge-container-plugin-ng installation failed. Continuing with setup."
+    install_deb "tedge-container-plugin-ng" "tedge-container-plugin-ng_*.deb"
+
+    # Load PI Historian Docker image (offline mode only)
+    if [[ "$OFFLINE" == "true" ]]; then
+        local tarball
+        tarball=$(find "$PACKAGES_DIR" -maxdepth 1 -name "pi_historian_connector_*.tar.gz" | sort -V | tail -1)
+        if [[ -n "$tarball" ]]; then
+            log "Loading PI Historian Docker image from: $(basename "$tarball")..."
+            docker load < "$tarball" || error_exit "Failed to load PI Historian Docker image"
+        else
+            warn "No pi_historian_connector_*.tar.gz found in ${PACKAGES_DIR}/ — skipping Docker image load."
+        fi
+    fi
 
     # Update Mosquitto listener to allow external connections
     log "Updating MQTT bind Address to 0.0.0.0 to allow external connections..."
@@ -134,7 +172,8 @@ install() {
     tedge mqtt pub 'te/device/main///twin/c8y_SupportedConfigurations' '[
         "pi_datapoints",
         "pi_config",
-        "tedge-configuration-plugin"
+        "tedge-configuration-plugin",
+        "pi_historian_connector"
     ]'
     # Create JSON configuration files in /etc/tedge/c8y
     log "Creating JSON configuration files in $CONFIG_DIR..."
@@ -151,6 +190,19 @@ EOF
     "POLL_INTERVAL": 90
 }
 EOF
+    
+    # ── Register pi_historian log type in tedge-log-plugin.toml ──────────────
+    local LOG_PLUGIN_TOML="/etc/tedge/plugins/tedge-log-plugin.toml"
+    local LOG_ENTRY='[[files]]\npath = "/etc/tedge/c8y/logs/*"\ntype = "pi_historian"'
+
+    if sudo grep -qF 'type = "pi_historian"' "$LOG_PLUGIN_TOML" 2>/dev/null; then
+        log "pi_historian log entry already present in $LOG_PLUGIN_TOML — skipping."
+    else
+        sudo mkdir -p "$(dirname "$LOG_PLUGIN_TOML")"
+        printf '\n%b\n' "$LOG_ENTRY" | sudo tee -a "$LOG_PLUGIN_TOML" >/dev/null \
+            && log "pi_historian log entry appended to $LOG_PLUGIN_TOML." \
+            || warn "Failed to append pi_historian log entry to $LOG_PLUGIN_TOML."
+    fi
 
     sudo chown tedge:tedge "$CONFIG_DIR"/*.json || error_exit "Failed to change ownership of JSON config files"
     sudo chmod 644 "$CONFIG_DIR"/*.json || error_exit "Failed to set permissions for JSON config files"
@@ -166,8 +218,8 @@ EOF
 uninstall() {
     echo "---- ThinEdge.io Uninstallation ----"
     # Directories
-    readonly CERT_DIR="/etc/tedge/device-certs"
-    readonly CONFIG_DIR="/etc/tedge/c8y"
+    CERT_DIR="/etc/tedge/device-certs"
+    CONFIG_DIR="/etc/tedge/c8y"
 
     log "Disconnecting ThinEdge.io from Cumulocity IoT..."
     sudo tedge disconnect c8y || warn "Disconnection skipped or failed. It might not have been connected."

@@ -21,7 +21,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Extract version
         id: vars
@@ -47,7 +47,7 @@ jobs:
           echo "zip_name=$ZIP_NAME" >> $GITHUB_OUTPUT
 
       - name: Upload standard artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: standard-release
           path: ${{ steps.zip.outputs.zip_name }}
@@ -61,10 +61,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5.6.0
         with:
           python-version: "3.11"
 
@@ -86,7 +86,7 @@ jobs:
           scripts/build_release.sh ${{ steps.vars.outputs.version }}
 
       - name: Upload offline artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: offline-release
           path: pi_historian_connector_v${{ steps.vars.outputs.version }}_offline.zip
@@ -101,12 +101,12 @@ jobs:
 
     steps:
       - name: Download standard artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v4.3.0
         with:
           name: standard-release
 
       - name: Download offline artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v4.3.0
         with:
           name: offline-release
 

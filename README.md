@@ -13,6 +13,7 @@ A Python-based service for [thin-edge](https://thin-edge.io/) designed to read d
 - Structured MQTT message publishing
 - Real-time monitoring of configuration file changes
 - Dynamic reconfiguration without service restart
+- Application logs written to `/etc/tedge/c8y/logs/` (persisted on host via volume mount, daily rotation)
 
 ## Requirements
 
@@ -88,12 +89,28 @@ mode = 0o644
 
 Make sure the following are in place before proceeding:
 
-- thin-edge installed and connected to the Cumulocity tenant
+- thin-edge installed and connected to the Cumulocity tenant — see [scripts/README.md](scripts/README.md) for the automated setup script
 - Device registered as a thin-edge device
 - Docker installed on the target VM
 - Container group feature installed on the device
 - Mosquitto broker exposed for external communication
 - `unzip` package installed on the device
+
+> **Automated setup:** `scripts/tedge_setup.sh` handles thin-edge installation, device registration (via OTP), certificate download, MQTT configuration, and PI connector prerequisites in a single command. Accepts Cumulocity domain with or without the `https://` prefix. See [scripts/README.md](scripts/README.md) for full instructions.
+
+### thin-edge MQTT configuration
+
+The PI connector runs inside a Docker container and connects to the Mosquitto broker on the host via `host.containers.internal`. By default Mosquitto only listens on `localhost`, which blocks this connection. Run the following **once** after thin-edge is installed and before starting the PI connector:
+
+```bash
+# Allow Mosquitto to accept connections from Docker containers
+sudo tedge config set mqtt.bind.address 0.0.0.0
+
+# Apply the change by reconnecting thin-edge to Cumulocity
+sudo tedge reconnect c8y
+```
+
+> These steps are automated by `scripts/tedge_setup.sh install` — see [scripts/README.md](scripts/README.md).
 
 ---
 
@@ -119,7 +136,7 @@ Two release assets are published for each version:
 
 #### Build both ZIPs using the build script
 
-Running `build_release.sh` produces **both** the online and air-gap ZIPs in a single pass:
+Running `build_release.sh` produces **both** the online and offline ZIPs in a single pass:
 
 ```bash
 git clone https://github.com/Cumulocity-IoT/thin-edge-aveva-pi-connector.git
@@ -134,7 +151,7 @@ The script will:
 2. Download pip dependency wheels for Python 3.11 / Linux x86_64
 3. Build the Docker image locally
 4. Export the image as a `.tar.gz` tarball
-5. Generate an airgap `docker-compose.yaml` with the correct image reference
+5. Generate an offline `docker-compose.yaml` with the correct image reference
 6. Bundle everything into `pi_historian_connector_v0.0.4_offline.zip`
 7. Clean up all temporary files and staging directories
 
@@ -186,8 +203,8 @@ cd pi_historian_connector_v0.0.4
 The zip extracts files directly at the top level:
 
 ```
-docker-compose.yaml                            # airgap service definition (pre-configured)
-logging.conf                                   # logging configuration
+docker-compose.yaml                            # offline service definition (pre-configured)
+logging.conf                                   # logging configuration (writes to /etc/tedge/c8y/logs/)
 requirements.txt                               # Python dependencies (reference only)
 pi_historian_connector_0.0.4.tar.gz            # pre-built Docker image tarball
 packages/                                      # pip wheels for offline pip install
@@ -217,12 +234,16 @@ pi_historian_connector   0.0.4   <id>   ...
 
 ### Step 4 — Ensure config files are in place
 
-The service mounts `/etc/tedge/c8y` — make sure the following files exist on the device before starting:
+The service mounts `/etc/tedge/c8y` for both configuration and log output. Make sure the following files exist on the device before starting:
 
 ```
 /etc/tedge/c8y/pi_config.json
 /etc/tedge/c8y/datapoints.json
 ```
+
+Application logs are written to `/etc/tedge/c8y/logs/pi_historian.log` on the host (rotated daily, 3 days retained).
+
+> These config files are created automatically by `scripts/tedge_setup.sh install` — see [scripts/README.md](scripts/README.md).
 
 See the [Configuration](#configuration) section for the expected file formats.
 
