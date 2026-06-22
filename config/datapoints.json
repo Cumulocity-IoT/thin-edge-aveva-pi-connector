@@ -1,4 +1,7 @@
 [
-    "78FIQ301.A",
-    "78FIC102.A"
+    "REACTOR01.TEMP",
+    "PUMP02.FLOW",
+    "COMPRESSOR.PRESSURE", 
+    "MOTOR01.SPEED",
+    "TANK01.LEVEL"
 ]

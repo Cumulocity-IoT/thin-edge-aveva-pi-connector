@@ -1,0 +1,19 @@
+# =============================================================================
+# PI Historian Flow — thin-edge.io tedge-flows definition
+# =============================================================================
+# input.process runs scripts/poll-pi.sh every 60 s.
+# Each stdout line from the script is:  TOPIC<TAB>JSON_PAYLOAD
+# The JS step (dist/main.js) splits the tab and re-emits on the correct topic.
+# =============================================================================
+
+input.mqtt.topics = ["pi-historian/control"]
+
+[input.process]
+command  = "bash ./scripts/poll-pi.sh"
+topic    = "pi-historian/data"
+interval = "60s"
+
+[[steps]]
+script = "dist/main.js"
+
+[output.mqtt]

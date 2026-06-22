@@ -19,6 +19,26 @@ set -euo pipefail # Exit immediately if a command exits with a non-zero status.
                   # Exit if any unset variables are used.
                   # Exit if a command in a pipeline fails.
 
+# ========== Constants ==========
+CERT_DIR="/etc/tedge/device-certs"
+CONFIG_DIR="/etc/tedge/c8y"
+LOG_PLUGIN_TOML="/etc/tedge/plugins/tedge-log-plugin.toml"
+LOG_ENTRY_TYPE="pi_historian"
+LOG_ENTRY_PATH="/etc/tedge/c8y/logs/*"
+
+RECORDING_AT_TIME="?time="
+POLL_INTERVAL=90
+
+SUPPORTED_CONFIGS='["pi_datapoints","pi_config","tedge-configuration-plugin","pi_historian_connector"]'
+
+DEFAULT_DATAPOINTS='[
+    "REACTOR01.TEMP",
+    "PUMP02.FLOW",
+    "COMPRESSOR.PRESSURE",
+    "MOTOR01.SPEED",
+    "TANK01.LEVEL"
+]'
+
 ACTION=${1:-}
 OFFLINE=false
 [[ "${2:-}" == "--offline" ]] && OFFLINE=true
@@ -90,9 +110,14 @@ install() {
     read -rp "Enter the One-Time Password (OTP) from Cumulocity Device Registration: " ENROLLMENT_OTP; echo
     [[ -z "$ENROLLMENT_OTP" ]] && error_exit "OTP cannot be empty. Generate it in Cumulocity → Device Management → Registration."
 
-    # Directories
-    CERT_DIR="/etc/tedge/device-certs"
-    CONFIG_DIR="/etc/tedge/c8y"
+    # PI System Inputs
+    PI_URL=$(prompt_input "Enter PI Web API base URL" "https://your-pi-server.com/piwebapi")
+    # Strip trailing slash
+    PI_URL="${PI_URL%/}"
+    PI_USER=$(prompt_input "Enter PI username" "piuser")
+    read -rsp "Enter PI password: " PI_PASSWORD_PLAIN; echo
+    [[ -z "$PI_PASSWORD_PLAIN" ]] && error_exit "PI password cannot be empty."
+    PI_PASSWORD=$(echo -n "$PI_PASSWORD_PLAIN" | base64)
 
     if [[ "$OFFLINE" == "true" ]]; then
         log "Offline mode: skipping repository setup."
@@ -169,33 +194,29 @@ install() {
 
     # Publish Device Configuration (Supported Configurations)
     log "Publishing device configuration to Cumulocity IoT..."
-    tedge mqtt pub 'te/device/main///twin/c8y_SupportedConfigurations' '[
-        "pi_datapoints",
-        "pi_config",
-        "tedge-configuration-plugin",
-        "pi_historian_connector"
-    ]'
+    tedge mqtt pub 'te/device/main///twin/c8y_SupportedConfigurations' "$SUPPORTED_CONFIGS"
+
     # Create JSON configuration files in /etc/tedge/c8y
     log "Creating JSON configuration files in $CONFIG_DIR..."
-    
+
     sudo tee "$CONFIG_DIR/datapoints.json" >/dev/null <<EOF
-[
-    "78FIQ301.A", "78FIC102.A"
-]
+$DEFAULT_DATAPOINTS
 EOF
 
     sudo tee "$CONFIG_DIR/pi_config.json" >/dev/null <<EOF
 {
-    "RECORDING_AT_TIME": "?time=",
-    "POLL_INTERVAL": 90
+    "RECORDING_AT_TIME": "${RECORDING_AT_TIME}",
+    "POLL_INTERVAL": ${POLL_INTERVAL},
+    "PI_URL": "${PI_URL}",
+    "PI_USER": "${PI_USER}",
+    "PI_PASSWORD": "${PI_PASSWORD}"
 }
 EOF
-    
-    # ── Register pi_historian log type in tedge-log-plugin.toml ──────────────
-    local LOG_PLUGIN_TOML="/etc/tedge/plugins/tedge-log-plugin.toml"
-    local LOG_ENTRY='[[files]]\npath = "/etc/tedge/c8y/logs/*"\ntype = "pi_historian"'
 
-    if sudo grep -qF 'type = "pi_historian"' "$LOG_PLUGIN_TOML" 2>/dev/null; then
+    # ── Register pi_historian log type in tedge-log-plugin.toml ──────────────
+    local LOG_ENTRY="[[files]]\npath = \"${LOG_ENTRY_PATH}\"\ntype = \"${LOG_ENTRY_TYPE}\""
+
+    if sudo grep -qF "type = \"${LOG_ENTRY_TYPE}\"" "$LOG_PLUGIN_TOML" 2>/dev/null; then
         log "pi_historian log entry already present in $LOG_PLUGIN_TOML — skipping."
     else
         sudo mkdir -p "$(dirname "$LOG_PLUGIN_TOML")"
@@ -217,9 +238,6 @@ EOF
 # ========== Uninstall Function ==========
 uninstall() {
     echo "---- ThinEdge.io Uninstallation ----"
-    # Directories
-    CERT_DIR="/etc/tedge/device-certs"
-    CONFIG_DIR="/etc/tedge/c8y"
 
     log "Disconnecting ThinEdge.io from Cumulocity IoT..."
     sudo tedge disconnect c8y || warn "Disconnection skipped or failed. It might not have been connected."

@@ -43,6 +43,7 @@ CONFIG = {
     "RECORDING_AT_TIME": "?time=",
     "POLL_INTERVAL": 60,
     "MEASUREMENT_TYPE": "pi_historianMeasurement",
+    "METADATA_TYPE": "pi_historianMetadata"
 }
 
 # Globals
@@ -222,7 +223,7 @@ def update_tag_metadata():
                 "tags": dataSeries,
                 "lastUpdated": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z')
         }
-        publish_msg(f"{CONFIG['MQTT_INVENTORY_TOPIC']}/sol_piHistorianMetadata", json.dumps(payload, indent=4))
+        publish_msg(f"{CONFIG['MQTT_INVENTORY_TOPIC']}/{CONFIG['METADATA_TYPE']}", json.dumps(payload, indent=4))
         log.info("tag metadata updated successfully")
     except Exception as e:
         log.error(f"Metadata update failed: {e}")

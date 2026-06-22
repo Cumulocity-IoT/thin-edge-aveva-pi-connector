@@ -2,6 +2,8 @@
 
 A Python-based service for [thin-edge](https://thin-edge.io/) designed to read data from the AVEVA PI System using REST APIs and publish it to an MQTT broker via thin-edge. The application also supports live configuration updates, enabling runtime changes without the need for a restart.
 
+> **Development & Testing:** A standalone [PI Web API simulator](pi-simulator/README.md) is included in the `pi-simulator/` directory. Use it to develop and test the connector without access to a real PI server.
+
 ## Architecture Diagram
 
 <img width="2060" height="470" alt="image" src="https://github.com/user-attachments/assets/2b20fd59-c544-4d49-8bf0-c7e6132b297b" />
@@ -10,16 +12,17 @@ A Python-based service for [thin-edge](https://thin-edge.io/) designed to read d
 ## Features
 
 - Periodic PI data collection via REST API (PI Web API)
-- Structured MQTT message publishing
+- Structured MQTT message publishing to Cumulocity IoT via thin-edge
 - Real-time monitoring of configuration file changes
 - Dynamic reconfiguration without service restart
+- Digital and enumeration tag support (handles JSON/dict values from PI digital points)
 - Application logs written to `/etc/tedge/c8y/logs/` (persisted on host via volume mount, daily rotation)
 
 ## Requirements
 
 - Python 3.11+
 - MQTT Broker (e.g., Mosquitto) version 2.1.0+
-- Access to PI Web API
+- Access to PI Web API (or the included [PI Simulator](pi-simulator/README.md) for development)
 
 ## Configuration
 
@@ -27,24 +30,31 @@ The following configuration files must be uploaded to the Cumulocity tenant for 
 
 ### Required Files
 
-- `pi_config.json`: This contains PI server configuraton details that will be used to fetch the actual details and used for connecting the PI system.
+- `pi_config.json`: PI server connection details used to fetch data and authenticate against the PI system.
+
     ```json
     {
         "RECORDING_AT_TIME": "?time=",
         "POLL_INTERVAL": 90,
         "PI_USER": "default_user",
         "PI_PASSWORD": "default_password-base64-encoded",
-        "PI_URL": "https://default-url.com"
+        "PI_URL": "https://default-url.com/piwebapi"
     }
-- `datapoints.json`: This contains the list of tags that must be read by the script and integrated to the Cumulocity tenant along with any user friendly name (optional).
+    ```
+
+- `datapoints.json`: List of PI tags to read and publish to Cumulocity, with optional friendly names.
+
     ```json
     [
         "78FIQ301.A",
         "78FIC102.A"
     ]
-Upload the above configuration files into Cumulocity-> Configuration Management tab, like below.
+    ```
+
+Upload the above configuration files into Cumulocity → Configuration Management tab, like below.
 
 ![Configuration Screenshot](configurations.png)
+
 ### Configuration via thin-edge
 
 Update your `tedge-configuration-plugin` to include the configuration files uploaded to Cumulocity Configuration Management.
@@ -77,6 +87,7 @@ user = "tedge"
 group = "tedge"
 mode = 0o644
 ```
+
 1. Push `tedge-configuration-plugin` configuration file first.
 2. Then push:
    - `pi_config`
@@ -158,6 +169,7 @@ The script will:
 The release CI (`release.yml`) runs the same script automatically on every tag push (`v*`) and can also be triggered manually via **Actions → Build and Upload ZIP Release → Run workflow**.
 
 ---
+
 ## Deploy Using Prebuilt Release (Standard / Online)
 
 1. Download the `*_online.zip` from [releases](https://github.com/Cumulocity-IoT/thin-edge-aveva-pi-connector/releases)
@@ -266,6 +278,54 @@ docker compose logs -f
 docker compose down
 ```
 
+---
+
+## Development & Testing with the PI Simulator
+
+The `pi-simulator/` directory contains a PI Web API compatible REST simulator built with FastAPI. It generates live time-series data for PI tags with configurable waveforms — no AVEVA license or network access required.
+
+### Quick start
+
+```bash
+cd pi-simulator
+docker compose up -d
+```
+
+The simulator starts on **http://localhost:8080** with 10 pre-configured tags (reactor temperature, pump flow, compressor pressure, etc.).
+
+### Point the PI connector at the simulator
+
+Create `/etc/tedge/c8y/pi_config.json` with the simulator's address:
+
+```json
+{
+    "RECORDING_AT_TIME": "?time=",
+    "POLL_INTERVAL": 30,
+    "PI_USER": "piuser",
+    "PI_PASSWORD": "cGlwYXNzd29yZA==",
+    "PI_URL": "http://host.containers.internal:8080/piwebapi"
+}
+```
+
+> `cGlwYXNzd29yZA==` is the base64 encoding of `pipassword` (the simulator's default password).  
+> When running the connector in Docker, use `host.containers.internal` to reach the simulator on the host. If running the connector directly on the host, use `http://localhost:8080/piwebapi`.
+
+Then set `datapoints.json` to any subset of the simulator's default tags:
+
+```json
+[
+    "REACTOR01.TEMP",
+    "PUMP02.FLOW",
+    "COMPRESSOR.PRESSURE",
+    "MOTOR01.SPEED",
+    "TANK01.LEVEL"
+]
+```
+
+For full simulator documentation — available endpoints, tag configuration, waveform types, and API reference — see [pi-simulator/README.md](pi-simulator/README.md).
+
+---
+
 ## Production Deployment via Cumulocity
 
 ### 1. Upload the Zipped Archive
@@ -295,4 +355,3 @@ These tools are provided as-is and without warranty or support. They do not cons
 
 ----------------------------------
 You can find additional information in the [Cumulocity Community](https://community.cumulocity.com/).
-
