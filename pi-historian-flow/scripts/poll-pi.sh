@@ -27,18 +27,33 @@ param_arr() {
         | grep -v '^[[:space:]]*$'
 }
 
-PI_URL="$(param_str pi_url)"
-PI_USER="$(param_str pi_user)"
-PI_PASSWORD_B64="$(param_str pi_password)"
+PI_CONFIG_FILE="/etc/tedge/c8y/pi_config.json"
+if [[ -f "$PI_CONFIG_FILE" ]]; then
+    PI_URL="$(jq -r '.PI_URL // empty' "$PI_CONFIG_FILE")"
+    PI_USER="$(jq -r '.PI_USER // empty' "$PI_CONFIG_FILE")"
+    PI_PASSWORD_B64="$(jq -r '.PI_PASSWORD // empty' "$PI_CONFIG_FILE")"
+else
+    PI_URL="$(param_str pi_url)"
+    PI_USER="$(param_str pi_user)"
+    PI_PASSWORD_B64="$(param_str pi_password)"
+fi
+
 QUERY_FILTER="$(param_str query_filter)"
 MEASUREMENT_TYPE="$(param_str measurement_type)"
 OUTPUT_TOPIC="$(param_str output_topic)"
 METADATA_TOPIC="$(param_str metadata_topic)"
 DEBUG="$(param_str debug)"
-mapfile -t DATAPOINTS < <(param_arr datapoints)
+
+DATAPOINTS_FILE="/etc/tedge/c8y/datapoints.json"
+if [[ -f "$DATAPOINTS_FILE" ]]; then
+    mapfile -t DATAPOINTS < <(jq -r '.[]' "$DATAPOINTS_FILE" 2>/dev/null)
+else
+    mapfile -t DATAPOINTS < <(param_arr datapoints)
+fi
 
 if [[ -z "$PI_URL" || -z "$PI_USER" || ${#DATAPOINTS[@]} -eq 0 ]]; then
-    echo "[pi-historian] Missing pi_url, pi_user, or datapoints in params.toml" >&2
+    echo "[pi-historian] Missing PI_URL, PI_USER, or empty datapoints" \
+         "(checked ${PI_CONFIG_FILE} / ${DATAPOINTS_FILE} then params.toml)" >&2
     exit 0
 fi
 

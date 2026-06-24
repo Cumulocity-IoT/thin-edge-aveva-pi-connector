@@ -5,15 +5,16 @@
 # defaults — it is NOT overwritten when the flow package is updated.
 # =============================================================================
 
-# Base URL of your PI Web API server
-pi_url = "http://host.containers.internal:8080/piwebapi"
-
-# PI Web API credentials
+# PI Web API connection — used only when /etc/tedge/c8y/pi_config.json does not exist.
+# Prefer managing these values via pi_config.json (updated remotely via Cumulocity config management).
+pi_url      = "http://host.containers.internal:8080/piwebapi"
 pi_user     = "piuser"
 pi_password = "cGlwYXNzd29yZA=="   # base64-encode your password first
 
-# List of PI tag names to poll every 60 seconds
-datapoints = ["REACTOR01.TEMP","PUMP02.FLOW","COMPRESSOR.PRESSURE", "MOTOR01.SPEED","TANK01.LEVEL"]
+# List of PI tag names to poll every 60 seconds.
+# Used only when /etc/tedge/c8y/datapoints.json does not exist.
+# Prefer managing datapoints via datapoints.json (updated remotely via Cumulocity config management).
+datapoints = ["REACTOR01.TEMP","PUMP02.FLOW","COMPRESSOR.PRESSURE","MOTOR01.SPEED","TANK01.LEVEL"]
 
 # Cumulocity measurement type (becomes the JSON fragment key)
 measurement_type = "pi_historianMeasurement"

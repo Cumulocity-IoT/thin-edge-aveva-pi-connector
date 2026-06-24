@@ -33,27 +33,62 @@ The tedge-flows JavaScript runtime (QuickJS) has no outbound networking, so all 
 
 ## Configuration
 
+The script resolves configuration from two sources in priority order:
+
+| Source | Fields | Updated via |
+|---|---|---|
+| `/etc/tedge/c8y/pi_config.json` | `PI_URL`, `PI_USER`, `PI_PASSWORD` | Cumulocity config management |
+| `/etc/tedge/c8y/datapoints.json` | tag list | Cumulocity config management |
+| `params.toml` | all fields (fallback) | manual edit on device |
+
+When a JSON file is present it takes precedence over `params.toml` for its fields. This means credentials and the tag list can be updated remotely from Cumulocity without touching the device directly.
+
+### `/etc/tedge/c8y/pi_config.json`
+
+Created by `tedge_setup.sh` during installation. Can be pushed again at any time from Cumulocity → Device Management → Configurations.
+
+```json
+{
+    "PI_URL":             "https://your-pi-server/piwebapi",
+    "PI_USER":            "piuser",
+    "PI_PASSWORD":        "base64encodedpassword",
+    "POLL_INTERVAL":      60,
+    "RECORDING_AT_TIME":  "?time="
+}
+```
+
+### `/etc/tedge/c8y/datapoints.json`
+
+Plain JSON array of PI tag names. Created by `tedge_setup.sh` and updatable remotely.
+
+```json
+[
+    "REACTOR01.TEMP",
+    "PUMP02.FLOW",
+    "COMPRESSOR.PRESSURE"
+]
+```
+
+### `params.toml` (fallback)
+
+Used for any field not supplied by the JSON files above, and for fields that have no JSON equivalent (`query_filter`, `measurement_type`, `output_topic`, `metadata_topic`, `debug`).
+
 Copy the template and fill in your values:
 
 ```bash
 cp params.toml.template params.toml
 ```
 
-`params.toml`:
-
 ```toml
-# Base URL of the PI Web API server
-pi_url = "https://your-pi-server/piwebapi"
-
-# Credentials — base64-encode your password:
-#   echo -n 'mypassword' | base64
+# Fallback — used when /etc/tedge/c8y/pi_config.json is absent
+pi_url      = "https://your-pi-server/piwebapi"
 pi_user     = "piuser"
 pi_password = "base64encodedpassword"
 
-# PI tag names to poll
+# Fallback — used when /etc/tedge/c8y/datapoints.json is absent
 datapoints = ["REACTOR01.TEMP", "PUMP02.FLOW", "COMPRESSOR.PRESSURE"]
 
-# Optional overrides (defaults shown)
+# Always read from params.toml (no JSON equivalent)
 measurement_type = "pi_historianMeasurement"
 output_topic     = "c8y/measurement/measurements/create"
 metadata_topic   = "te/device/main///twin"
@@ -188,6 +223,9 @@ The tedge-flows JavaScript runtime (QuickJS via rquickjs) intentionally exposes 
 
 **Why compact JSON (`jq -c`)?**
 `input.process` delivers each stdout line as a separate message. `jq` defaults to pretty-printed (multi-line) JSON, which would split a single payload across many messages. The `-c` flag forces single-line output, keeping each `TOPIC\tPAYLOAD` pair on one line.
+
+**Config resolution order**
+On each poll the script checks for `/etc/tedge/c8y/pi_config.json` and `/etc/tedge/c8y/datapoints.json`. If present, they override the equivalent `params.toml` fields. Changes pushed from Cumulocity are therefore picked up automatically on the next 60-second tick — no restart required.
 
 **Why 16 KB chunks?**
 The Cumulocity MQTT broker enforces a 16 KB maximum message size. When a polling cycle covers many PI tags, the combined measurement or twin-update JSON can exceed this limit. The script accumulates tags into a running chunk and flushes it as a separate MQTT message whenever the next tag would push the payload past 16 384 bytes. Measurement chunks and twin chunks are tracked independently, since the two payload structures have different per-entry overhead.
