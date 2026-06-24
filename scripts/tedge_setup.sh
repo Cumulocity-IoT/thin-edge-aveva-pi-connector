@@ -53,6 +53,18 @@ if [[ -z "$ACTION" ]]; then
     exit 1
 fi
 
+# ========== Environment Detection ==========
+# Detect whether we are running inside a container (devcontainer / Docker).
+# In a container systemd is not available, so service management is handled
+# via scripts/start-tedge.sh instead of systemctl.
+IS_CONTAINER=false
+if [[ -f /.dockerenv ]] || \
+   [[ -n "${REMOTE_CONTAINERS:-}" ]] || \
+   [[ -n "${CODESPACES:-}" ]] || \
+   grep -q 'docker\|lxc\|kubepods' /proc/1/cgroup 2>/dev/null; then
+    IS_CONTAINER=true
+fi
+
 # ========== Logging Helpers ==========
 log() { echo -e "\033[1;32m[+] $1\033[0m"; }
 warn() { echo -e "\033[1;33m[!] $1\033[0m"; }
@@ -107,7 +119,7 @@ install() {
     CUMULOCITY_DOMAIN="${CUMULOCITY_DOMAIN#http://}"
     CUMULOCITY_DOMAIN="${CUMULOCITY_DOMAIN%/}"
     DEVICE_EXTERNAL_ID=$(prompt_input "Enter thin-edge device external Id" "tedge-device-01")
-    read -rp "Enter the One-Time Password (OTP) from Cumulocity Device Registration: " ENROLLMENT_OTP; echo
+    read -rsp "Enter the One-Time Password (OTP) from Cumulocity Device Registration: " ENROLLMENT_OTP; echo
     [[ -z "$ENROLLMENT_OTP" ]] && error_exit "OTP cannot be empty. Generate it in Cumulocity → Device Management → Registration."
 
     # PI System Inputs
@@ -154,13 +166,40 @@ install() {
 
     # Connect ThinEdge.io to Cumulocity IoT
     log "Connecting ThinEdge.io to Cumulocity IoT..."
-    if connect_output=$(sudo tedge connect c8y 2>&1); then
-        echo "$connect_output"
-    elif echo "$connect_output" | grep -q "already established"; then
-        warn "thin-edge is already connected to Cumulocity — skipping connect."
+    if [[ "$IS_CONTAINER" == "true" ]]; then
+        # systemd is not available in a container. Inject a temporary no-op
+        # systemctl onto PATH so `tedge connect` can write the bridge/TLS
+        # config without failing on service management, then start the real
+        # services via start-tedge.sh.
+        _NOOP="$(mktemp -d)"
+        cat > "${_NOOP}/systemctl" << 'NOOP_EOF'
+#!/bin/bash
+echo "[systemctl-noop] $*" >&2
+exit 0
+NOOP_EOF
+        chmod +x "${_NOOP}/systemctl"
+        connect_output="$(sudo env PATH="${_NOOP}:${PATH}" tedge connect c8y 2>&1)" && \
+            echo "$connect_output" || {
+            if echo "$connect_output" | grep -q "already established"; then
+                warn "thin-edge is already connected to Cumulocity — skipping connect."
+            else
+                echo "$connect_output" >&2
+                warn "tedge connect reported errors (likely service-start related in container) — proceeding."
+            fi
+        }
+        rm -rf "${_NOOP}"
+        log "Starting tedge services via start-tedge.sh..."
+        sudo bash "${SCRIPT_DIR}/start-tedge.sh" &
+        sleep 3
     else
-        echo "$connect_output" >&2
-        error_exit "Failed to connect ThinEdge.io to Cumulocity"
+        if connect_output=$(sudo tedge connect c8y 2>&1); then
+            echo "$connect_output"
+        elif echo "$connect_output" | grep -q "already established"; then
+            warn "thin-edge is already connected to Cumulocity — skipping connect."
+        else
+            echo "$connect_output" >&2
+            error_exit "Failed to connect ThinEdge.io to Cumulocity"
+        fi
     fi
 
     # Install ThinEdge Container Plugin (Next Generation)
@@ -189,8 +228,14 @@ install() {
     sudo tedge config set c8y.proxy.bind.address 0.0.0.0 || warn "Failed to set c8y.proxy.bind.address. Continuing."
 
     
-    log "Restarting tedge c8y service..."
-    sudo tedge reconnect c8y || warn "Failed to restart tedge c8y service. Please check the service status."
+    if [[ "$IS_CONTAINER" == "true" ]]; then
+        log "Container environment — restarting services via start-tedge.sh..."
+        sudo bash "${SCRIPT_DIR}/start-tedge.sh" &
+        sleep 2
+    else
+        log "Restarting tedge c8y service..."
+        sudo tedge reconnect c8y || warn "Failed to restart tedge c8y service. Please check the service status."
+    fi
 
     # Publish Device Configuration (Supported Configurations)
     log "Publishing device configuration to Cumulocity IoT..."
@@ -232,7 +277,11 @@ EOF
     log "ThinEdge.io device setup completed successfully!"
     echo "----------------------------------------"
     log "Please verify device connection in Cumulocity IoT portal."
-    log "You can check ThinEdge.io services status with: sudo systemctl status 'tedge-*'"
+    if [[ "$IS_CONTAINER" == "true" ]]; then
+        log "Services running in background via start-tedge.sh. Logs: /var/log/tedge/"
+    else
+        log "You can check ThinEdge.io services status with: sudo systemctl status 'tedge-*'"
+    fi
 }
 
 # ========== Uninstall Function ==========

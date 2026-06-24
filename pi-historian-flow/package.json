@@ -6,8 +6,8 @@
     "build": "esbuild src/main.ts --bundle --platform=neutral --format=esm --outfile=dist/main.js",
     "build:watch": "esbuild src/main.ts --bundle --platform=neutral --format=esm --outfile=dist/main.js --watch",
     "package": "COPYFILE_DISABLE=1 tar czf ../pi-historian-flow.tar.gz flow.toml params.toml.template dist/main.js",
-    "deploy:local": "cp -Ra . /etc/tedge/mappers/c8y/flows/pi-historian-flow",
-    "undeploy:local": "rm -rf /etc/tedge/mappers/c8y/flows/pi-historian-flow && systemctl restart tedge-mapper-c8y"
+    "deploy:local": "sudo cp -Ra . /etc/tedge/mappers/c8y/flows/pi-historian-flow",
+    "undeploy:local": "sudo rm -rf /etc/tedge/mappers/c8y/flows/pi-historian-flow && sudo systemctl restart tedge-mapper-c8y"
   },
   "devDependencies": {
     "esbuild": "*",
