@@ -1,16 +1,16 @@
 # pi-historian-flow
 
-A [thin-edge.io](https://thin-edge.io) flow that polls an **AVEVA PI Web API** server every 60 seconds and publishes measurements and metadata to **Cumulocity IoT** via MQTT.
+A [thin-edge.io](https://thin-edge.io) flow that polls an **AVEVA PI Web API** server on a configurable interval and publishes measurements and metadata to **Cumulocity IoT** via MQTT.
 
 ## Architecture
 
 ```
 [scripts/poll-pi.sh]  ──curl──▶  PI Web API
-        │
-        │  stdout: TOPIC<TAB>JSON_PAYLOAD  (one line per message;
-        │          multiple lines emitted when chunking kicks in)
+        │   long-running loop; interval read from pi_config.json each cycle
+        │   stdout: TOPIC<TAB>JSON_PAYLOAD  (one line per message;
+        │           multiple lines emitted when chunking kicks in)
         ▼
-[tedge-flows input.process]   interval = 60s
+[tedge-flows input.process]   (continuous subprocess — no fixed interval)
         │
         │  Message { topic: "pi-historian/data", payload: line }
         ▼
@@ -20,7 +20,7 @@ A [thin-edge.io](https://thin-edge.io) flow that polls an **AVEVA PI Web API** s
         └──▶  te/device/main///twin/pi_historianMetadata  { tag metadata chunk }  ×N
 ```
 
-The tedge-flows JavaScript runtime (QuickJS) has no outbound networking, so all HTTP calls are handled by the shell script using `curl`. The JS bundle acts as a pure message router — it receives each line from the script and routes it to the correct MQTT topic.
+The tedge-flows JavaScript runtime (QuickJS) has no outbound networking, so all HTTP calls are handled by the shell script using `curl`. The JS bundle acts as a pure message router — it receives each line from the script and routes it to the correct MQTT topic. The script runs as a long-lived subprocess and manages its own poll interval via `sleep`, so `flows.toml` carries no `interval` setting.
 
 ## Prerequisites
 
@@ -37,7 +37,7 @@ The script resolves configuration from two sources in priority order:
 
 | Source | Fields | Updated via |
 |---|---|---|
-| `/etc/tedge/c8y/pi_config.json` | `PI_URL`, `PI_USER`, `PI_PASSWORD` | Cumulocity config management |
+| `/etc/tedge/c8y/pi_config.json` | `PI_URL`, `PI_USER`, `PI_PASSWORD`, `POLL_INTERVAL` | Cumulocity config management |
 | `/etc/tedge/c8y/datapoints.json` | tag list | Cumulocity config management |
 | `params.toml` | all fields (fallback) | manual edit on device |
 
@@ -149,16 +149,14 @@ cd /etc/tedge/mappers/c8y/flows/pi-historian-flow
 bash ./scripts/poll-pi.sh
 ```
 
-A successful run prints at least two lines to stdout (more when chunking splits a large payload):
+The script runs as a long-lived process and loops indefinitely. Each poll cycle prints at least two lines to stdout (more when chunking splits a large payload), then sleeps for `POLL_INTERVAL` seconds before the next cycle:
 
 ```
 c8y/measurement/measurements/create	{"type":"pi_historianMeasurement","time":"...","pi_historianMeasurement":{...}}
-c8y/measurement/measurements/create	{"type":"pi_historianMeasurement","time":"...","pi_historianMeasurement":{...}}
-te/device/main///twin/pi_historianMetadata	{"tags":{...},"lastUpdated":"..."}
 te/device/main///twin/pi_historianMetadata	{"tags":{...},"lastUpdated":"..."}
 ```
 
-When there are only a few datapoints the output is one measurement line and one metadata line. Additional lines appear only when the tag count is large enough to exceed the 16 KB limit.
+Press `Ctrl+C` to stop the manual run. Additional lines per cycle appear only when the tag count is large enough to exceed the 16 KB chunk limit.
 
 Enable `debug = true` in `params.toml` to log each tag's fetched value to stderr (visible in the mapper journal).
 
@@ -166,7 +164,7 @@ Enable `debug = true` in `params.toml` to log each tag's fetched value to stderr
 
 ### Measurements
 
-Published to `c8y/measurement/measurements/create` every 60 seconds. When the full set of tags would produce a payload larger than 16 KB, the script emits multiple messages — each a self-contained measurement fragment sharing the same timestamp:
+Published to `c8y/measurement/measurements/create` on every poll cycle (interval controlled by `POLL_INTERVAL` in `pi_config.json`, default 60 s). When the full set of tags would produce a payload larger than 16 KB, the script emits multiple messages — each a self-contained measurement fragment sharing the same timestamp:
 
 ```json
 {
@@ -219,13 +217,16 @@ pi-historian-flow/
 ## Development notes
 
 **Why a shell script instead of JS?**
-The tedge-flows JavaScript runtime (QuickJS via rquickjs) intentionally exposes no networking APIs — only `console`, `crypto`, `TextEncoder`/`TextDecoder`, and a KV store. All HTTP calls must happen outside the JS sandbox. The `[input.process]` mechanism in `flows.toml` runs the shell script as a subprocess; its stdout lines are fed into the JS step as MQTT messages.
+The tedge-flows JavaScript runtime (QuickJS via rquickjs) intentionally exposes no networking APIs — only `console`, `crypto`, `TextEncoder`/`TextDecoder`, and a KV store. All HTTP calls must happen outside the JS sandbox. The `[input.process]` mechanism in `flows.toml` runs the shell script as a long-lived subprocess; its stdout lines are streamed into the JS step as MQTT messages.
 
 **Why compact JSON (`jq -c`)?**
 `input.process` delivers each stdout line as a separate message. `jq` defaults to pretty-printed (multi-line) JSON, which would split a single payload across many messages. The `-c` flag forces single-line output, keeping each `TOPIC\tPAYLOAD` pair on one line.
 
+**Why a self-managed loop instead of `interval` in `flows.toml`?**
+The `interval` field in `flows.toml` is static — it cannot be changed at runtime. Moving the sleep into the script itself means `POLL_INTERVAL` is re-read from `pi_config.json` on every cycle, so a new value pushed from Cumulocity takes effect on the next tick without restarting the mapper.
+
 **Config resolution order**
-On each poll the script checks for `/etc/tedge/c8y/pi_config.json` and `/etc/tedge/c8y/datapoints.json`. If present, they override the equivalent `params.toml` fields. Changes pushed from Cumulocity are therefore picked up automatically on the next 60-second tick — no restart required.
+On each poll cycle the script re-reads `/etc/tedge/c8y/pi_config.json` (`PI_URL`, `PI_USER`, `PI_PASSWORD`, `POLL_INTERVAL`) and `/etc/tedge/c8y/datapoints.json` (tag list). If a file is present it takes precedence over the equivalent `params.toml` fields. Changes pushed from Cumulocity are therefore picked up automatically on the next cycle — no restart required.
 
 **Why 16 KB chunks?**
 The Cumulocity MQTT broker enforces a 16 KB maximum message size. When a polling cycle covers many PI tags, the combined measurement or twin-update JSON can exceed this limit. The script accumulates tags into a running chunk and flushes it as a separate MQTT message whenever the next tag would push the payload past 16 384 bytes. Measurement chunks and twin chunks are tracked independently, since the two payload structures have different per-entry overhead.

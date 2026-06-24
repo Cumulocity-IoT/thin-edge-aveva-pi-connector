@@ -9,9 +9,8 @@
 input.mqtt.topics = ["pi-historian/control"]
 
 [input.process]
-command  = "bash ./scripts/poll-pi.sh"
-topic    = "pi-historian/data"
-interval = "60s"
+command = "bash ./scripts/poll-pi.sh"
+topic   = "pi-historian/data"
 
 [[steps]]
 script = "dist/main.js"
