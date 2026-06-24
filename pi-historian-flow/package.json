@@ -10,7 +10,7 @@
     "undeploy:local": "sudo rm -rf /etc/tedge/mappers/c8y/flows/pi-historian-flow && sudo systemctl restart tedge-mapper-c8y"
   },
   "devDependencies": {
-    "esbuild": "*",
+    "esbuild": "^0.28.1",
     "typescript": "*"
   }
 }
