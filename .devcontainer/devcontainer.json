@@ -2,13 +2,32 @@
   "name": "Python Microservice Dev Container",
   "dockerFile": "Dockerfile",
 
+  // privileged kept only for Docker-in-Docker — not for systemd
+  "privileged": true,
+
   "runArgs": [
     "--add-host=host.containers.internal:host-gateway"
+    // removed: --cap-add=SYS_ADMIN        (only needed for real systemd)
+    // removed: --security-opt seccomp=...  (only needed for real systemd)
   ],
 
   "mounts": [
     "source=/etc/tedge/c8y,target=/etc/tedge/c8y,type=bind"
+    // removed: /sys/fs/cgroup bind mount  ← this was killing the container on WSL2
   ],
+
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+      "version": "latest",
+      "moby": false,
+      "enableNonRootDocker": "true",
+      "dockerDashComposeVersion": "v2"
+    },
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "lts",
+      "installGlobals": "esbuild"
+    }
+  },
 
   "containerEnv": {
     "PYTHONPATH": "/workspaces",

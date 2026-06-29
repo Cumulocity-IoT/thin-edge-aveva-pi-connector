@@ -1,10 +1,10 @@
 # Use the official Python image from the Docker Hub
 FROM python:3.11-slim
 
-#RUN apt-get update && \
-#    apt-get install -y curl && \
-#    apt-get clean && \
-#    rm -rf /var/lib/apt/lists/*
+RUN apt-get update && \
+    apt-get install -y curl && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # Set the working directory in the container
 WORKDIR /app

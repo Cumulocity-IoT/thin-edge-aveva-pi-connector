@@ -19,6 +19,28 @@ set -euo pipefail # Exit immediately if a command exits with a non-zero status.
                   # Exit if any unset variables are used.
                   # Exit if a command in a pipeline fails.
 
+# ========== Constants ==========
+CERT_DIR="/etc/tedge/device-certs"
+CONFIG_DIR="/etc/tedge/c8y"
+LOG_PLUGIN_TOML="/etc/tedge/plugins/tedge-log-plugin.toml"
+CONFIG_PLUGIN_TOML="/etc/tedge/plugins/tedge-configuration-plugin.toml"
+LOG_ENTRY_TYPE="pi_historian"
+TEDGE_FILE_OWNER="tedge"
+LOG_ENTRY_PATH="/etc/tedge/c8y/logs/*"
+
+RECORDING_AT_TIME="?time="
+POLL_INTERVAL=60
+
+SUPPORTED_CONFIGS='["pi_datapoints","pi_config","tedge-configuration-plugin","pi_historian_connector"]'
+
+DEFAULT_DATAPOINTS='[
+    "REACTOR01.TEMP",
+    "PUMP02.FLOW",
+    "COMPRESSOR.PRESSURE",
+    "MOTOR01.SPEED",
+    "TANK01.LEVEL"
+]'
+
 ACTION=${1:-}
 OFFLINE=false
 [[ "${2:-}" == "--offline" ]] && OFFLINE=true
@@ -31,6 +53,18 @@ PACKAGES_DIR="${SCRIPT_DIR}/packages"
 if [[ -z "$ACTION" ]]; then
     echo "Usage: $0 [install|uninstall] [--offline]"
     exit 1
+fi
+
+# ========== Environment Detection ==========
+# Detect whether we are running inside a container (devcontainer / Docker).
+# In a container systemd is not available, so service management is handled
+# via scripts/start-tedge.sh instead of systemctl.
+IS_CONTAINER=false
+if [[ -f /.dockerenv ]] || \
+   [[ -n "${REMOTE_CONTAINERS:-}" ]] || \
+   [[ -n "${CODESPACES:-}" ]] || \
+   grep -q 'docker\|lxc\|kubepods' /proc/1/cgroup 2>/dev/null; then
+    IS_CONTAINER=true
 fi
 
 # ========== Logging Helpers ==========
@@ -87,12 +121,17 @@ install() {
     CUMULOCITY_DOMAIN="${CUMULOCITY_DOMAIN#http://}"
     CUMULOCITY_DOMAIN="${CUMULOCITY_DOMAIN%/}"
     DEVICE_EXTERNAL_ID=$(prompt_input "Enter thin-edge device external Id" "tedge-device-01")
-    read -rp "Enter the One-Time Password (OTP) from Cumulocity Device Registration: " ENROLLMENT_OTP; echo
+    read -rsp "Enter the One-Time Password (OTP) from Cumulocity Device Registration: " ENROLLMENT_OTP; echo
     [[ -z "$ENROLLMENT_OTP" ]] && error_exit "OTP cannot be empty. Generate it in Cumulocity → Device Management → Registration."
 
-    # Directories
-    CERT_DIR="/etc/tedge/device-certs"
-    CONFIG_DIR="/etc/tedge/c8y"
+    # PI System Inputs
+    PI_URL=$(prompt_input "Enter PI Web API base URL" "https://your-pi-server.com/piwebapi")
+    # Strip trailing slash
+    PI_URL="${PI_URL%/}"
+    PI_USER=$(prompt_input "Enter PI username" "piuser")
+    read -rsp "Enter PI password: " PI_PASSWORD_PLAIN; echo
+    [[ -z "$PI_PASSWORD_PLAIN" ]] && error_exit "PI password cannot be empty."
+    PI_PASSWORD=$(echo -n "$PI_PASSWORD_PLAIN" | base64 -w 0)
 
     if [[ "$OFFLINE" == "true" ]]; then
         log "Offline mode: skipping repository setup."
@@ -129,13 +168,37 @@ install() {
 
     # Connect ThinEdge.io to Cumulocity IoT
     log "Connecting ThinEdge.io to Cumulocity IoT..."
-    if connect_output=$(sudo tedge connect c8y 2>&1); then
-        echo "$connect_output"
-    elif echo "$connect_output" | grep -q "already established"; then
-        warn "thin-edge is already connected to Cumulocity — skipping connect."
+    if [[ "$IS_CONTAINER" == "true" ]]; then
+        # systemd is not available in a container. Inject a temporary no-op
+        # systemctl onto PATH so `tedge connect` can write the bridge/TLS
+        # config without failing on service management, then start the real
+        # services via start-tedge.sh.
+        _NOOP="$(mktemp -d)"
+        cat > "${_NOOP}/systemctl" << 'NOOP_EOF'
+#!/bin/bash
+echo "[systemctl-noop] $*" >&2
+exit 0
+NOOP_EOF
+        chmod +x "${_NOOP}/systemctl"
+        connect_output="$(sudo env PATH="${_NOOP}:${PATH}" tedge connect c8y 2>&1)" && \
+            echo "$connect_output" || {
+            if echo "$connect_output" | grep -q "already established"; then
+                warn "thin-edge is already connected to Cumulocity — skipping connect."
+            else
+                echo "$connect_output" >&2
+                warn "tedge connect reported errors (likely service-start related in container) — proceeding."
+            fi
+        }
+        rm -rf "${_NOOP}"
     else
-        echo "$connect_output" >&2
-        error_exit "Failed to connect ThinEdge.io to Cumulocity"
+        if connect_output=$(sudo tedge connect c8y 2>&1); then
+            echo "$connect_output"
+        elif echo "$connect_output" | grep -q "already established"; then
+            warn "thin-edge is already connected to Cumulocity — skipping connect."
+        else
+            echo "$connect_output" >&2
+            error_exit "Failed to connect ThinEdge.io to Cumulocity"
+        fi
     fi
 
     # Install ThinEdge Container Plugin (Next Generation)
@@ -164,38 +227,61 @@ install() {
     sudo tedge config set c8y.proxy.bind.address 0.0.0.0 || warn "Failed to set c8y.proxy.bind.address. Continuing."
 
     
-    log "Restarting tedge c8y service..."
-    sudo tedge reconnect c8y || warn "Failed to restart tedge c8y service. Please check the service status."
+    if [[ "$IS_CONTAINER" == "true" ]]; then
+        log "Container environment — starting services via start-tedge.sh (after all config applied)..."
+        sudo bash "${SCRIPT_DIR}/start-tedge.sh" &
+        sleep 2
+    else
+        log "Restarting tedge c8y service..."
+        sudo tedge reconnect c8y || warn "Failed to restart tedge c8y service. Please check the service status."
+    fi
 
     # Publish Device Configuration (Supported Configurations)
     log "Publishing device configuration to Cumulocity IoT..."
-    tedge mqtt pub 'te/device/main///twin/c8y_SupportedConfigurations' '[
-        "pi_datapoints",
-        "pi_config",
-        "tedge-configuration-plugin",
-        "pi_historian_connector"
-    ]'
+    tedge mqtt pub 'te/device/main///twin/c8y_SupportedConfigurations' "$SUPPORTED_CONFIGS"
+
     # Create JSON configuration files in /etc/tedge/c8y
     log "Creating JSON configuration files in $CONFIG_DIR..."
-    
+
     sudo tee "$CONFIG_DIR/datapoints.json" >/dev/null <<EOF
-[
-    "78FIQ301.A", "78FIC102.A"
-]
+$DEFAULT_DATAPOINTS
 EOF
 
     sudo tee "$CONFIG_DIR/pi_config.json" >/dev/null <<EOF
 {
-    "RECORDING_AT_TIME": "?time=",
-    "POLL_INTERVAL": 90
+    "RECORDING_AT_TIME": "${RECORDING_AT_TIME}",
+    "POLL_INTERVAL": ${POLL_INTERVAL},
+    "PI_URL": "${PI_URL}",
+    "PI_USER": "${PI_USER}",
+    "PI_PASSWORD": "${PI_PASSWORD}"
 }
 EOF
-    
-    # ── Register pi_historian log type in tedge-log-plugin.toml ──────────────
-    local LOG_PLUGIN_TOML="/etc/tedge/plugins/tedge-log-plugin.toml"
-    local LOG_ENTRY='[[files]]\npath = "/etc/tedge/c8y/logs/*"\ntype = "pi_historian"'
 
-    if sudo grep -qF 'type = "pi_historian"' "$LOG_PLUGIN_TOML" 2>/dev/null; then
+    # ── Register pi_datapoints and pi_config in tedge-configuration-plugin.toml ──
+    sudo mkdir -p "$(dirname "$CONFIG_PLUGIN_TOML")"
+
+    if sudo grep -qF 'type = "pi_datapoints"' "$CONFIG_PLUGIN_TOML" 2>/dev/null; then
+        log "pi_datapoints config entry already present in $CONFIG_PLUGIN_TOML — skipping."
+    else
+        printf "\n[[files]]\npath = \"$CONFIG_DIR/datapoints.json\"\ntype = \"pi_datapoints\"\nuser = \"$TEDGE_FILE_OWNER\"\ngroup = \"$TEDGE_FILE_OWNER\"\nmode = 0o644\n" \
+            | sudo tee -a "$CONFIG_PLUGIN_TOML" >/dev/null \
+            && log "pi_datapoints entry appended to $CONFIG_PLUGIN_TOML." \
+            || warn "Failed to append pi_datapoints entry to $CONFIG_PLUGIN_TOML."
+    fi
+
+    if sudo grep -qF 'type = "pi_config"' "$CONFIG_PLUGIN_TOML" 2>/dev/null; then
+        log "pi_config config entry already present in $CONFIG_PLUGIN_TOML — skipping."
+    else
+        printf "\n[[files]]\npath = \"$CONFIG_DIR/pi_config.json\"\ntype = \"pi_config\"\nuser = \"$TEDGE_FILE_OWNER\"\ngroup = \"$TEDGE_FILE_OWNER\"\nmode = 0o640\n" \
+            | sudo tee -a "$CONFIG_PLUGIN_TOML" >/dev/null \
+            && log "pi_config entry appended to $CONFIG_PLUGIN_TOML." \
+            || warn "Failed to append pi_config entry to $CONFIG_PLUGIN_TOML."
+    fi
+
+    # ── Register pi_historian log type in tedge-log-plugin.toml ──────────────
+    local LOG_ENTRY="[[files]]\npath = \"${LOG_ENTRY_PATH}\"\ntype = \"${LOG_ENTRY_TYPE}\""
+
+    if sudo grep -qF "type = \"${LOG_ENTRY_TYPE}\"" "$LOG_PLUGIN_TOML" 2>/dev/null; then
         log "pi_historian log entry already present in $LOG_PLUGIN_TOML — skipping."
     else
         sudo mkdir -p "$(dirname "$LOG_PLUGIN_TOML")"
@@ -205,21 +291,23 @@ EOF
     fi
 
     sudo chown tedge:tedge "$CONFIG_DIR"/*.json || error_exit "Failed to change ownership of JSON config files"
-    sudo chmod 644 "$CONFIG_DIR"/*.json || error_exit "Failed to set permissions for JSON config files"
+    sudo chmod 644 "$CONFIG_DIR/datapoints.json" || error_exit "Failed to set permissions for datapoints.json"
+    sudo chmod 640 "$CONFIG_DIR/pi_config.json"  || error_exit "Failed to set permissions for pi_config.json"
 
     log "All ThinEdge.io configuration files created in $CONFIG_DIR"
     log "ThinEdge.io device setup completed successfully!"
     echo "----------------------------------------"
     log "Please verify device connection in Cumulocity IoT portal."
-    log "You can check ThinEdge.io services status with: sudo systemctl status 'tedge-*'"
+    if [[ "$IS_CONTAINER" == "true" ]]; then
+        log "Services running in background via start-tedge.sh. Logs: /var/log/tedge/"
+    else
+        log "You can check ThinEdge.io services status with: sudo systemctl status 'tedge-*'"
+    fi
 }
 
 # ========== Uninstall Function ==========
 uninstall() {
     echo "---- ThinEdge.io Uninstallation ----"
-    # Directories
-    CERT_DIR="/etc/tedge/device-certs"
-    CONFIG_DIR="/etc/tedge/c8y"
 
     log "Disconnecting ThinEdge.io from Cumulocity IoT..."
     sudo tedge disconnect c8y || warn "Disconnection skipped or failed. It might not have been connected."

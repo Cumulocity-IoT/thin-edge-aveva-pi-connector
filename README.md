@@ -10,9 +10,10 @@ A Python-based service for [thin-edge](https://thin-edge.io/) designed to read d
 ## Features
 
 - Periodic PI data collection via REST API (PI Web API)
-- Structured MQTT message publishing
+- Structured MQTT message publishing to Cumulocity IoT via thin-edge
 - Real-time monitoring of configuration file changes
 - Dynamic reconfiguration without service restart
+- Digital and enumeration tag support (handles JSON/dict values from PI digital points)
 - Application logs written to `/etc/tedge/c8y/logs/` (persisted on host via volume mount, daily rotation)
 
 ## Requirements
@@ -27,24 +28,31 @@ The following configuration files must be uploaded to the Cumulocity tenant for 
 
 ### Required Files
 
-- `pi_config.json`: This contains PI server configuraton details that will be used to fetch the actual details and used for connecting the PI system.
+- `pi_config.json`: PI server connection details used to fetch data and authenticate against the PI system.
+
     ```json
     {
         "RECORDING_AT_TIME": "?time=",
-        "POLL_INTERVAL": 90,
+        "POLL_INTERVAL": 60,
         "PI_USER": "default_user",
         "PI_PASSWORD": "default_password-base64-encoded",
-        "PI_URL": "https://default-url.com"
+        "PI_URL": "https://default-url.com/piwebapi"
     }
-- `datapoints.json`: This contains the list of tags that must be read by the script and integrated to the Cumulocity tenant along with any user friendly name (optional).
+    ```
+
+- `datapoints.json`: List of PI tags to read and publish to Cumulocity, with optional friendly names.
+
     ```json
     [
         "78FIQ301.A",
         "78FIC102.A"
     ]
-Upload the above configuration files into Cumulocity-> Configuration Management tab, like below.
+    ```
+
+Upload the above configuration files into Cumulocity → Configuration Management tab, like below.
 
 ![Configuration Screenshot](configurations.png)
+
 ### Configuration via thin-edge
 
 Update your `tedge-configuration-plugin` to include the configuration files uploaded to Cumulocity Configuration Management.
@@ -75,8 +83,9 @@ path = "/etc/tedge/c8y/pi_config.json"
 type = "pi_config"
 user = "tedge"
 group = "tedge"
-mode = 0o644
+mode = 0o640
 ```
+
 1. Push `tedge-configuration-plugin` configuration file first.
 2. Then push:
    - `pi_config`
@@ -158,6 +167,7 @@ The script will:
 The release CI (`release.yml`) runs the same script automatically on every tag push (`v*`) and can also be triggered manually via **Actions → Build and Upload ZIP Release → Run workflow**.
 
 ---
+
 ## Deploy Using Prebuilt Release (Standard / Online)
 
 1. Download the `*_online.zip` from [releases](https://github.com/Cumulocity-IoT/thin-edge-aveva-pi-connector/releases)
@@ -266,6 +276,8 @@ docker compose logs -f
 docker compose down
 ```
 
+---
+
 ## Production Deployment via Cumulocity
 
 ### 1. Upload the Zipped Archive
@@ -295,4 +307,3 @@ These tools are provided as-is and without warranty or support. They do not cons
 
 ----------------------------------
 You can find additional information in the [Cumulocity Community](https://community.cumulocity.com/).
-
