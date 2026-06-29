@@ -5,22 +5,43 @@ A [thin-edge.io](https://thin-edge.io) flow that polls an **AVEVA PI Web API** s
 ## Architecture
 
 ```
-[scripts/poll-pi.sh]  ──curl──▶  PI Web API
-        │   long-running loop; interval read from pi_config.json each cycle
-        │   stdout: TOPIC<TAB>JSON_PAYLOAD  (one line per message;
-        │           multiple lines emitted when chunking kicks in)
-        ▼
-[tedge-flows input.process]   (continuous subprocess — no fixed interval)
-        │
-        │  Message { topic: "pi-historian/data", payload: line }
-        ▼
-[dist/main.js]  onMessage()   ── splits on TAB, re-emits on correct topic
-        │
-        ├──▶  c8y/measurement/measurements/create   { measurement chunk }  ×N
-        └──▶  te/device/main///twin/pi_historianMetadata  { tag metadata chunk }  ×N
+ ┌─────────────────────────────────────────────────────────────────┐
+ │  scripts/poll-pi.sh  (long-running loop)                        │
+ │                                                                  │
+ │   every POLL_INTERVAL seconds (from pi_config.json, default 60) │
+ │        │                                                         │
+ │        ├── curl ──► PI Web API  /dataservers                     │
+ │        ├── curl ──► PI Web API  /points?namefilter=<tag>         │
+ │        └── curl ──► PI Web API  /recordeddata/attime?time=<ts>  │
+ │                                                                  │
+ │   outputs to stdout:  TOPIC <TAB> JSON_PAYLOAD                   │
+ │   (one line per message; multiple lines when 16 KB chunking)     │
+ └───────────────────────┬─────────────────────────────────────────┘
+                         │ stdout stream
+                         ▼
+ ┌─────────────────────────────────────────────────────────────────┐
+ │  tedge-flows  [input.process]                                    │
+ │  continuous subprocess — no fixed interval in flows.toml         │
+ │                                                                  │
+ │  wraps each line as:  Message { topic, payload }                 │
+ └───────────────────────┬─────────────────────────────────────────┘
+                         │ Message
+                         ▼
+ ┌─────────────────────────────────────────────────────────────────┐
+ │  dist/main.js  onMessage()                                       │
+ │  splits payload on TAB → topic | json                            │
+ │  re-emits on the embedded topic                                  │
+ └───────────┬───────────────────────────────┬─────────────────────┘
+             │                               │
+             ▼                               ▼
+ c8y/measurement/               te/device/main///twin/
+ measurements/create            pi_historianMetadata
+ { measurement chunk }  ×N      { tag metadata chunk }  ×N
 ```
 
-The tedge-flows JavaScript runtime (QuickJS) has no outbound networking, so all HTTP calls are handled by the shell script using `curl`. The JS bundle acts as a pure message router — it receives each line from the script and routes it to the correct MQTT topic. The script runs as a long-lived subprocess and manages its own poll interval via `sleep`, so `flows.toml` carries no `interval` setting.
+- **`poll-pi.sh`** — shell script that owns all HTTP traffic; runs as a long-lived subprocess so the poll interval can be adjusted at runtime from Cumulocity without restarting the mapper.
+- **`tedge-flows input.process`** — streams each stdout line of the script into the JS step as an MQTT message.
+- **`dist/main.js`** — pure message router compiled from `src/main.ts`; no networking, no state — just a tab-split and re-emit.
 
 ## Prerequisites
 

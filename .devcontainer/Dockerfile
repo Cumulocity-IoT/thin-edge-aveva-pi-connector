@@ -5,13 +5,10 @@ RUN apt-get update \
         unixodbc \
         unixodbc-dev \
         build-essential \
-    && curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
-    && rm -rf /var/lib/apt/lists/* \
-    && npm install -g esbuild
+    && rm -rf /var/lib/apt/lists/*
 
 # Pre-create log directory used by start-tedge.sh (runs as non-root vscode user)
-RUN mkdir -p /var/log/tedge && chmod 777 /var/log/tedge
+RUN mkdir -p /var/log/tedge && chown vscode:vscode /var/log/tedge && chmod 755 /var/log/tedge
 
 WORKDIR /workspaces
 

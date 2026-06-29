@@ -1,7 +1,9 @@
 # =============================================================================
 # PI Historian Flow — thin-edge.io tedge-flows definition
 # =============================================================================
-# input.process runs scripts/poll-pi.sh every 60 s.
+# input.process runs scripts/poll-pi.sh as a long-lived subprocess.
+# The poll cadence is controlled by POLL_INTERVAL inside the script (default 60 s,
+# configurable via /etc/tedge/c8y/pi_config.json without restarting the flow).
 # Each stdout line from the script is:  TOPIC<TAB>JSON_PAYLOAD
 # The JS step (dist/main.js) splits the tab and re-emits on the correct topic.
 # =============================================================================

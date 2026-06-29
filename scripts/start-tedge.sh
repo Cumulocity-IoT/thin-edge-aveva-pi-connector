@@ -32,7 +32,7 @@ mosquitto -c /etc/mosquitto/mosquitto.conf \
 
 # Wait until mosquitto is actually ready
 for i in $(seq 1 10); do
-    nc -z localhost 1883 2>/dev/null && break
+    (: < /dev/tcp/localhost/1883) 2>/dev/null && break
     echo "[tedge] Waiting for mosquitto... ($i)"
     sleep 1
 done

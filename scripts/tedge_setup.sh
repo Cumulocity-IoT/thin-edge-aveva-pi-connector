@@ -23,7 +23,9 @@ set -euo pipefail # Exit immediately if a command exits with a non-zero status.
 CERT_DIR="/etc/tedge/device-certs"
 CONFIG_DIR="/etc/tedge/c8y"
 LOG_PLUGIN_TOML="/etc/tedge/plugins/tedge-log-plugin.toml"
+CONFIG_PLUGIN_TOML="/etc/tedge/plugins/tedge-configuration-plugin.toml"
 LOG_ENTRY_TYPE="pi_historian"
+TEDGE_FILE_OWNER="tedge"
 LOG_ENTRY_PATH="/etc/tedge/c8y/logs/*"
 
 RECORDING_AT_TIME="?time="
@@ -188,9 +190,6 @@ NOOP_EOF
             fi
         }
         rm -rf "${_NOOP}"
-        log "Starting tedge services via start-tedge.sh..."
-        sudo bash "${SCRIPT_DIR}/start-tedge.sh" &
-        sleep 3
     else
         if connect_output=$(sudo tedge connect c8y 2>&1); then
             echo "$connect_output"
@@ -229,7 +228,7 @@ NOOP_EOF
 
     
     if [[ "$IS_CONTAINER" == "true" ]]; then
-        log "Container environment — restarting services via start-tedge.sh..."
+        log "Container environment — starting services via start-tedge.sh (after all config applied)..."
         sudo bash "${SCRIPT_DIR}/start-tedge.sh" &
         sleep 2
     else
@@ -258,6 +257,27 @@ EOF
 }
 EOF
 
+    # ── Register pi_datapoints and pi_config in tedge-configuration-plugin.toml ──
+    sudo mkdir -p "$(dirname "$CONFIG_PLUGIN_TOML")"
+
+    if sudo grep -qF 'type = "pi_datapoints"' "$CONFIG_PLUGIN_TOML" 2>/dev/null; then
+        log "pi_datapoints config entry already present in $CONFIG_PLUGIN_TOML — skipping."
+    else
+        printf "\n[[files]]\npath = \"$CONFIG_DIR/datapoints.json\"\ntype = \"pi_datapoints\"\nuser = \"$TEDGE_FILE_OWNER\"\ngroup = \"$TEDGE_FILE_OWNER\"\nmode = 0o644\n" \
+            | sudo tee -a "$CONFIG_PLUGIN_TOML" >/dev/null \
+            && log "pi_datapoints entry appended to $CONFIG_PLUGIN_TOML." \
+            || warn "Failed to append pi_datapoints entry to $CONFIG_PLUGIN_TOML."
+    fi
+
+    if sudo grep -qF 'type = "pi_config"' "$CONFIG_PLUGIN_TOML" 2>/dev/null; then
+        log "pi_config config entry already present in $CONFIG_PLUGIN_TOML — skipping."
+    else
+        printf "\n[[files]]\npath = \"$CONFIG_DIR/pi_config.json\"\ntype = \"pi_config\"\nuser = \"$TEDGE_FILE_OWNER\"\ngroup = \"$TEDGE_FILE_OWNER\"\nmode = 0o640\n" \
+            | sudo tee -a "$CONFIG_PLUGIN_TOML" >/dev/null \
+            && log "pi_config entry appended to $CONFIG_PLUGIN_TOML." \
+            || warn "Failed to append pi_config entry to $CONFIG_PLUGIN_TOML."
+    fi
+
     # ── Register pi_historian log type in tedge-log-plugin.toml ──────────────
     local LOG_ENTRY="[[files]]\npath = \"${LOG_ENTRY_PATH}\"\ntype = \"${LOG_ENTRY_TYPE}\""
 
@@ -271,7 +291,8 @@ EOF
     fi
 
     sudo chown tedge:tedge "$CONFIG_DIR"/*.json || error_exit "Failed to change ownership of JSON config files"
-    sudo chmod 644 "$CONFIG_DIR"/*.json || error_exit "Failed to set permissions for JSON config files"
+    sudo chmod 644 "$CONFIG_DIR/datapoints.json" || error_exit "Failed to set permissions for datapoints.json"
+    sudo chmod 640 "$CONFIG_DIR/pi_config.json"  || error_exit "Failed to set permissions for pi_config.json"
 
     log "All ThinEdge.io configuration files created in $CONFIG_DIR"
     log "ThinEdge.io device setup completed successfully!"

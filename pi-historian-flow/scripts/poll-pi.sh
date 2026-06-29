@@ -6,9 +6,9 @@
 #   TOPIC<TAB>JSON_PAYLOAD
 #
 # Runs as a continuous process under tedge-flows [input.process].
-# Poll interval is read from /etc/tedge/c8y/pi_config.json (POLL_INTERVAL)
-# on every cycle, so changes pushed from Cumulocity take effect immediately
-# without a restart.
+# PI connection fields (PI_URL, PI_USER, PI_PASSWORD, POLL_INTERVAL,
+# RECORDING_AT_TIME) are read from /etc/tedge/c8y/pi_config.json on every
+# cycle, so changes pushed from Cumulocity take effect without a restart.
 #
 # Requires: bash, curl, jq
 
@@ -84,15 +84,17 @@ while true; do
 
     # Read PI connection config — re-read every cycle so remote updates take effect
     if [[ -f "$PI_CONFIG_FILE" ]]; then
-        PI_URL="$(        jq -r '.PI_URL        // empty' "$PI_CONFIG_FILE")"
-        PI_USER="$(       jq -r '.PI_USER       // empty' "$PI_CONFIG_FILE")"
-        PI_PASSWORD_B64="$(jq -r '.PI_PASSWORD  // empty' "$PI_CONFIG_FILE")"
-        POLL_INTERVAL="$( jq -r '.POLL_INTERVAL // 60'   "$PI_CONFIG_FILE")"
+        PI_URL="$(            jq -r '.PI_URL             // empty'   "$PI_CONFIG_FILE")"
+        PI_USER="$(           jq -r '.PI_USER            // empty'   "$PI_CONFIG_FILE")"
+        PI_PASSWORD_B64="$(   jq -r '.PI_PASSWORD        // empty'   "$PI_CONFIG_FILE")"
+        POLL_INTERVAL="$(     jq -r '.POLL_INTERVAL      // 60'      "$PI_CONFIG_FILE")"
+        RECORDING_AT_TIME="$( jq -r '.RECORDING_AT_TIME // "?time="' "$PI_CONFIG_FILE")"
     else
         PI_URL="$(param_str pi_url)"
         PI_USER="$(param_str pi_user)"
         PI_PASSWORD_B64="$(param_str pi_password)"
         POLL_INTERVAL=60
+        RECORDING_AT_TIME="?time="
     fi
 
     QUERY_FILTER="$(param_str query_filter)"
@@ -153,7 +155,7 @@ while true; do
         REC_LINK="$(  echo "$META_RESP" | jq -r '.Items[0].Links.RecordedData // empty')"
         [[ -z "$REC_LINK" ]] && continue
 
-        VAL_RESP="$(pi_get "${REC_LINK}attime?time=${ENC_TS}")" || {
+        VAL_RESP="$(pi_get "${REC_LINK}attime${RECORDING_AT_TIME}${ENC_TS}")" || {
             [[ "$DEBUG" == "true" ]] && echo "[pi-historian] value fetch failed: $TAG" >&2
             continue
         }

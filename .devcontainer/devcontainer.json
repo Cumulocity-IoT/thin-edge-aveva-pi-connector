@@ -22,6 +22,10 @@
       "moby": false,
       "enableNonRootDocker": "true",
       "dockerDashComposeVersion": "v2"
+    },
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "lts",
+      "installGlobals": "esbuild"
     }
   },
 

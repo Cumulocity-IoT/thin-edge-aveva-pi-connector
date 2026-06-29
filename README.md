@@ -2,8 +2,6 @@
 
 A Python-based service for [thin-edge](https://thin-edge.io/) designed to read data from the AVEVA PI System using REST APIs and publish it to an MQTT broker via thin-edge. The application also supports live configuration updates, enabling runtime changes without the need for a restart.
 
-> **Development & Testing:** A standalone [PI Web API simulator](pi-simulator/README.md) is included in the `pi-simulator/` directory. Use it to develop and test the connector without access to a real PI server.
-
 ## Architecture Diagram
 
 <img width="2060" height="470" alt="image" src="https://github.com/user-attachments/assets/2b20fd59-c544-4d49-8bf0-c7e6132b297b" />
@@ -22,7 +20,7 @@ A Python-based service for [thin-edge](https://thin-edge.io/) designed to read d
 
 - Python 3.11+
 - MQTT Broker (e.g., Mosquitto) version 2.1.0+
-- Access to PI Web API (or the included [PI Simulator](pi-simulator/README.md) for development)
+- Access to PI Web API
 
 ## Configuration
 
@@ -85,7 +83,7 @@ path = "/etc/tedge/c8y/pi_config.json"
 type = "pi_config"
 user = "tedge"
 group = "tedge"
-mode = 0o644
+mode = 0o640
 ```
 
 1. Push `tedge-configuration-plugin` configuration file first.
@@ -277,52 +275,6 @@ docker compose logs -f
 ```bash
 docker compose down
 ```
-
----
-
-## Development & Testing with the PI Simulator
-
-The `pi-simulator/` directory contains a PI Web API compatible REST simulator built with FastAPI. It generates live time-series data for PI tags with configurable waveforms — no AVEVA license or network access required.
-
-### Quick start
-
-```bash
-cd pi-simulator
-docker compose up -d
-```
-
-The simulator starts on **http://localhost:8080** with 10 pre-configured tags (reactor temperature, pump flow, compressor pressure, etc.).
-
-### Point the PI connector at the simulator
-
-Create `/etc/tedge/c8y/pi_config.json` with the simulator's address:
-
-```json
-{
-    "RECORDING_AT_TIME": "?time=",
-    "POLL_INTERVAL": 30,
-    "PI_USER": "piuser",
-    "PI_PASSWORD": "cGlwYXNzd29yZA==",
-    "PI_URL": "http://host.containers.internal:8080/piwebapi"
-}
-```
-
-> `cGlwYXNzd29yZA==` is the base64 encoding of `pipassword` (the simulator's default password).  
-> When running the connector in Docker, use `host.containers.internal` to reach the simulator on the host. If running the connector directly on the host, use `http://localhost:8080/piwebapi`.
-
-Then set `datapoints.json` to any subset of the simulator's default tags:
-
-```json
-[
-    "REACTOR01.TEMP",
-    "PUMP02.FLOW",
-    "COMPRESSOR.PRESSURE",
-    "MOTOR01.SPEED",
-    "TANK01.LEVEL"
-]
-```
-
-For full simulator documentation — available endpoints, tag configuration, waveform types, and API reference — see [pi-simulator/README.md](pi-simulator/README.md).
 
 ---
 

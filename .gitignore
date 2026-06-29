@@ -1,2 +1,3 @@
 node_modules/
-pi-simulator/
+aveva-pi-simulator/
+pi-historian-flow/params.toml
