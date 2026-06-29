@@ -138,7 +138,7 @@ scripts/tedge_setup.sh install --offline
 | 13 | Publish supported configuration types (`pi_datapoints`, `pi_config`, `tedge-configuration-plugin`, `pi_historian_connector`) |
 | 14 | Create default `datapoints.json` and `pi_config.json` in `/etc/tedge/c8y/` |
 | 15 | Register `pi_historian` log type in `tedge-log-plugin.toml` |
-| 16 | Set correct ownership (`tedge:tedge`) and permissions (`644`) on config files |
+| 16 | Set ownership (`tedge:tedge`) and permissions: `644` on `datapoints.json`, `640` on `pi_config.json` (contains credentials) |
 
 #### Default config files created
 
@@ -157,7 +157,7 @@ scripts/tedge_setup.sh install --offline
 ```json
 {
     "RECORDING_AT_TIME": "?time=",
-    "POLL_INTERVAL": 90,
+    "POLL_INTERVAL": 60,
     "PI_URL": "<entered PI Web API URL>",
     "PI_USER": "<entered PI username>",
     "PI_PASSWORD": "<base64-encoded PI password>"

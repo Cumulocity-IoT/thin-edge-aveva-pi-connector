@@ -2,13 +2,14 @@
 set -e
 
 LOG_DIR="/var/log/tedge"
-mkdir -p "$LOG_DIR"
+sudo mkdir -p "$LOG_DIR"
+sudo chown "$(id -u):$(id -g)" "$LOG_DIR"
 
 stop_services() {
     echo "[tedge] Stopping services..."
-    pkill -f mosquitto   2>/dev/null || true
-    pkill -f tedge-mapper 2>/dev/null || true
-    pkill -f tedge-agent  2>/dev/null || true
+    sudo pkill -f mosquitto   2>/dev/null || true
+    sudo pkill -f tedge-mapper 2>/dev/null || true
+    sudo pkill -f tedge-agent  2>/dev/null || true
 }
 
 trap stop_services EXIT INT TERM
@@ -27,8 +28,7 @@ log_dest stdout
 EOF
 
 echo "[tedge] Starting mosquitto..."
-mosquitto -c /etc/mosquitto/mosquitto.conf \
-          > "$LOG_DIR/mosquitto.log" 2>&1 &
+sudo mosquitto -c /etc/mosquitto/mosquitto.conf > "$LOG_DIR/mosquitto.log" 2>&1 &
 
 # Wait until mosquitto is actually ready
 for i in $(seq 1 10); do
@@ -38,12 +38,12 @@ for i in $(seq 1 10); do
 done
 
 echo "[tedge] Starting tedge-mapper..."
-tedge-mapper c8y > "$LOG_DIR/tedge-mapper.log" 2>&1 &
+sudo tedge-mapper c8y > "$LOG_DIR/tedge-mapper.log" 2>&1 &
 
 sleep 1
 
 echo "[tedge] Starting tedge-agent..."
-tedge-agent > "$LOG_DIR/tedge-agent.log" 2>&1 &
+sudo tedge-agent > "$LOG_DIR/tedge-agent.log" 2>&1 &
 
 echo "[tedge] All services started."
 echo "[tedge] Logs: $LOG_DIR/"

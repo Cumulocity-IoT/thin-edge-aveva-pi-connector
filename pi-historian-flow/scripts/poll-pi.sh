@@ -36,11 +36,13 @@ param_arr() {
 
 # --- helpers ---
 pi_get() {
-    curl -sf \
+    curl -sf --connect-timeout 5 --max-time 30 \
         -H "Authorization: $AUTH" \
         -H "Content-Type: application/json" \
         "$1"
 }
+
+bytecount() { printf '%s' "$1" | wc -c; }
 
 urlencode() {
     local s="$1" out="" i c o
@@ -83,13 +85,15 @@ emit_twin() {
 while true; do
 
     # Read PI connection config — re-read every cycle so remote updates take effect
-    if [[ -f "$PI_CONFIG_FILE" ]]; then
+    if [[ -f "$PI_CONFIG_FILE" ]] && jq empty "$PI_CONFIG_FILE" 2>/dev/null; then
         PI_URL="$(            jq -r '.PI_URL             // empty'   "$PI_CONFIG_FILE")"
         PI_USER="$(           jq -r '.PI_USER            // empty'   "$PI_CONFIG_FILE")"
         PI_PASSWORD_B64="$(   jq -r '.PI_PASSWORD        // empty'   "$PI_CONFIG_FILE")"
         POLL_INTERVAL="$(     jq -r '.POLL_INTERVAL      // 60'      "$PI_CONFIG_FILE")"
         RECORDING_AT_TIME="$( jq -r '.RECORDING_AT_TIME // "?time="' "$PI_CONFIG_FILE")"
     else
+        [[ -f "$PI_CONFIG_FILE" ]] && \
+            echo "[pi-historian] WARNING: $PI_CONFIG_FILE contains invalid JSON — falling back to params.toml" >&2
         PI_URL="$(param_str pi_url)"
         PI_USER="$(param_str pi_user)"
         PI_PASSWORD_B64="$(param_str pi_password)"
@@ -191,7 +195,7 @@ while true; do
         NEW_MDATA="$(echo "$CHUNK_MDATA" | jq -c --arg k "$KEY" --argjson v "$ENTRY" '. + {($k):$v}')"
         CANDIDATE="$(jq -cn --arg type "$MTYPE" --arg time "$TIMESTAMP" --argjson data "$NEW_MDATA" \
             '{"type":$type,"time":$time,($type):$data}')"
-        if [[ "${#CANDIDATE}" -gt "$MAX_PAYLOAD_BYTES" ]]; then
+        if [[ "$(bytecount "$CANDIDATE")" -gt "$MAX_PAYLOAD_BYTES" ]]; then
             emit_measurement "$CHUNK_MDATA"
             NEW_MDATA="$(jq -cn --arg k "$KEY" --argjson v "$ENTRY" '{($k):$v}')"
         fi
@@ -202,7 +206,7 @@ while true; do
             '. + {($k):{description:$d}}')"
         CANDIDATE="$(jq -cn --arg ts "$TIMESTAMP" --argjson tags "$NEW_MTAGS" \
             '{"tags":$tags,"lastUpdated":$ts}')"
-        if [[ "${#CANDIDATE}" -gt "$MAX_PAYLOAD_BYTES" ]]; then
+        if [[ "$(bytecount "$CANDIDATE")" -gt "$MAX_PAYLOAD_BYTES" ]]; then
             emit_twin "$CHUNK_MTAGS"
             NEW_MTAGS="$(jq -cn --arg k "$KEY" --arg d "$DESCRIPTOR" '{($k):{description:$d}}')"
         fi

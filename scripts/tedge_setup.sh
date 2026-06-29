@@ -29,7 +29,7 @@ TEDGE_FILE_OWNER="tedge"
 LOG_ENTRY_PATH="/etc/tedge/c8y/logs/*"
 
 RECORDING_AT_TIME="?time="
-POLL_INTERVAL=90
+POLL_INTERVAL=60
 
 SUPPORTED_CONFIGS='["pi_datapoints","pi_config","tedge-configuration-plugin","pi_historian_connector"]'
 
@@ -131,7 +131,7 @@ install() {
     PI_USER=$(prompt_input "Enter PI username" "piuser")
     read -rsp "Enter PI password: " PI_PASSWORD_PLAIN; echo
     [[ -z "$PI_PASSWORD_PLAIN" ]] && error_exit "PI password cannot be empty."
-    PI_PASSWORD=$(echo -n "$PI_PASSWORD_PLAIN" | base64)
+    PI_PASSWORD=$(echo -n "$PI_PASSWORD_PLAIN" | base64 -w 0)
 
     if [[ "$OFFLINE" == "true" ]]; then
         log "Offline mode: skipping repository setup."

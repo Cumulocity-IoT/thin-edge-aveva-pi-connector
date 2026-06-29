@@ -33,7 +33,7 @@ The following configuration files must be uploaded to the Cumulocity tenant for 
     ```json
     {
         "RECORDING_AT_TIME": "?time=",
-        "POLL_INTERVAL": 90,
+        "POLL_INTERVAL": 60,
         "PI_USER": "default_user",
         "PI_PASSWORD": "default_password-base64-encoded",
         "PI_URL": "https://default-url.com/piwebapi"
