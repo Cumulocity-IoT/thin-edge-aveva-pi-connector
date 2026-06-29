@@ -151,6 +151,17 @@ systemctl restart tedge-mapper-c8y
 
 The deploy copies the full project (including `scripts/`, `dist/`, `flows.toml`, and `params.toml`) into `/etc/tedge/mappers/c8y/flows/pi-historian-flow/`.
 
+## Remote deployment via Cumulocity Software Management
+
+1. Build the tarball: `npm run package` — produces `pi-historian-flow.tar.gz` one level up.
+2. In Cumulocity → Software Repository, upload the tarball with:
+   - **Name**: `c8y/pi-historian-flow` *(the `flow` sm-plugin requires `<mapper>/<flow-name>` format)*
+   - **Version**: `1.0.0` (or the current version)
+   - **Software type**: `flow`
+3. Install the software on the target device from Device Management → Software.
+
+The plugin unpacks the tarball into `/etc/tedge/mappers/c8y/flows/pi-historian-flow/` and reloads the mapper automatically.
+
 ## Undeploy
 
 ```bash

@@ -1,11 +1,11 @@
 {
-  "name": "pi-historian-flow",
+  "name": "c8y/pi-historian-flow",
   "version": "1.0.0",
   "description": "tedge-flow that polls AVEVA PI Web API and publishes measurements to Cumulocity",
   "scripts": {
     "build": "esbuild src/main.ts --bundle --platform=neutral --format=esm --outfile=dist/main.js",
     "build:watch": "esbuild src/main.ts --bundle --platform=neutral --format=esm --outfile=dist/main.js --watch",
-    "package": "COPYFILE_DISABLE=1 tar czf ../pi-historian-flow.tar.gz flows.toml params.toml.template dist/main.js scripts/poll-pi.sh",
+    "package": "npm run build && COPYFILE_DISABLE=1 tar czf ../pi-historian-flow.tar.gz package.json flows.toml params.toml params.toml.template dist/main.js scripts/poll-pi.sh",
     "deploy:local": "sudo cp -Ra . /etc/tedge/mappers/c8y/flows/pi-historian-flow",
     "undeploy:local": "sudo rm -rf /etc/tedge/mappers/c8y/flows/pi-historian-flow && sudo systemctl restart tedge-mapper-c8y"
   },
