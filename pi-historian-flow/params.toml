@@ -1,0 +1,31 @@
+# =============================================================================
+# PI Historian Flow — configuration defaults
+# Edit this file (params.toml) and fill in your values.
+# The flow reads params.toml automatically; params.toml.template is only for
+# defaults — it is NOT overwritten when the flow package is updated. (Avoid committing real credentials.)
+# =============================================================================
+
+# Base URL of your PI Web API server
+pi_url = "http://localhost:8080/piwebapi"
+
+# PI Web API credentials
+pi_user     = "piuser"
+pi_password = "base64encodedpassword"   # base64-encode your password first
+
+# List of PI tag names to poll every 60 seconds
+datapoints = ["REACTOR01.TEMP","PUMP02.FLOW","COMPRESSOR.PRESSURE", "MOTOR01.SPEED","TANK01.LEVEL"]
+
+# Cumulocity measurement type (becomes the JSON fragment key)
+measurement_type = "pi_historianMeasurement"
+
+# MQTT topic to publish measurements — direct C8y MQTT API
+output_topic = "c8y/measurement/measurements/create"
+
+# MQTT twin topic prefix for device metadata (published once on startup)
+metadata_topic = "te/device/main///twin"
+
+# PI Web API query filter appended to the dataserver Points link
+query_filter = "?query=PointType:Float32&namefilter="
+
+# Set to true to enable verbose console logging
+debug = false
