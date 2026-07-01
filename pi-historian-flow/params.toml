@@ -1,8 +1,8 @@
 # =============================================================================
-# PI Historian Flow — configuration template
-# Copy this file to params.toml and fill in your values.
+# PI Historian Flow — configuration defaults
+# Edit this file (params.toml) and fill in your values.
 # The flow reads params.toml automatically; params.toml.template is only for
-# defaults — it is NOT overwritten when the flow package is updated.
+# defaults — it is NOT overwritten when the flow package is updated. (Avoid committing real credentials.)
 # =============================================================================
 
 # Base URL of your PI Web API server
