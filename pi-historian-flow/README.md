@@ -162,7 +162,7 @@ The deploy copies the full project (including `scripts/`, `dist/`, `flows.toml`,
 
 The plugin unpacks the tarball into `/etc/tedge/mappers/c8y/flows/pi-historian-flow/` and reloads the mapper automatically.
 
-![alt text](image.png)
+![PI Historian flow deployment diagram](image.png)
 
 ## Undeploy
 
