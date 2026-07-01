@@ -27,8 +27,11 @@ jobs:
         run: |
           if [[ -n "${{ github.event.inputs.version }}" ]]; then
             RAW="${{ github.event.inputs.version }}"
-          else
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
             RAW="${GITHUB_REF#refs/tags/}"
+          else
+            echo "ERROR: 'version' input is empty and ref is not a tag ($GITHUB_REF). Provide a version like v0.0.4 or run this workflow from a tag." >&2
+            exit 1
           fi
           echo "version=${RAW#v}" >> $GITHUB_OUTPUT
           echo "tag=$RAW" >> $GITHUB_OUTPUT
