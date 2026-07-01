@@ -7,37 +7,48 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version (e.g. v0.0.4)"
-        required: true
-        default: "v0.0.4"
+        description: "Release version (e.g. v0.0.4) — leave blank to use the pushed tag"
+        required: false
 
 jobs:
+  # ─────────────────────────────────────────────────────────
+  # Job 0: Resolve version once; all other jobs consume it
+  # ─────────────────────────────────────────────────────────
+  get-version:
+    name: "Resolve Release Version"
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.vars.outputs.version }}
+      tag: ${{ steps.vars.outputs.tag }}
+
+    steps:
+      - name: Extract version
+        id: vars
+        run: |
+          if [[ -n "${{ github.event.inputs.version }}" ]]; then
+            RAW="${{ github.event.inputs.version }}"
+          else
+            RAW="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "version=${RAW#v}" >> $GITHUB_OUTPUT
+          echo "tag=$RAW" >> $GITHUB_OUTPUT
+
   # ─────────────────────────────────────────────────────────
   # Job 1: Standard (online) release — source + compose only
   # ─────────────────────────────────────────────────────────
   build-standard:
     name: "Standard Release (online install)"
     runs-on: ubuntu-latest
+    needs: get-version
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
 
-      - name: Extract version
-        id: vars
-        run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            RAW="${{ github.event.inputs.version }}"
-          else
-            RAW="${GITHUB_REF#refs/tags/}"
-          fi
-          # Strip leading 'v' for use in filenames
-          echo "version=${RAW#v}" >> $GITHUB_OUTPUT
-
       - name: Build standard ZIP
         id: zip
         run: |
-          ZIP_NAME="pi_historian_connector_${{ steps.vars.outputs.version }}_online.zip"
+          ZIP_NAME="pi_historian_connector_${{ needs.get-version.outputs.version }}_online.zip"
           zip "$ZIP_NAME" \
             app.py \
             docker-compose.yaml \
@@ -58,6 +69,7 @@ jobs:
   build-offline:
     name: "Offline Release"
     runs-on: ubuntu-latest
+    needs: get-version
 
     steps:
       - name: Checkout repository
@@ -68,28 +80,16 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Extract version
-        id: vars
-        run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            RAW="${{ github.event.inputs.version }}"
-          else
-            RAW="${GITHUB_REF#refs/tags/}"
-          fi
-          # Strip leading 'v' for use as a semver in image tags / filenames
-          echo "version=${RAW#v}" >> $GITHUB_OUTPUT
-          echo "tag=$RAW" >> $GITHUB_OUTPUT
-
       - name: Build offline ZIP via build_release.sh
         run: |
           chmod +x scripts/build_release.sh
-          scripts/build_release.sh ${{ steps.vars.outputs.version }}
+          scripts/build_release.sh ${{ needs.get-version.outputs.version }}
 
       - name: Upload offline artifact
         uses: actions/upload-artifact@v4.6.2
         with:
           name: offline-release
-          path: pi_historian_connector_v${{ steps.vars.outputs.version }}_offline.zip
+          path: pi_historian_connector_v${{ needs.get-version.outputs.version }}_offline.zip
 
   # ─────────────────────────────────────────────────────────
   # Job 3: Build pi-historian-flow tarball (Node.js / tedge-flow)
@@ -97,20 +97,11 @@ jobs:
   build-pi-historian-flow:
     name: "Build PI Historian Flow (tedge-flow)"
     runs-on: ubuntu-latest
+    needs: get-version
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
-
-      - name: Extract version
-        id: vars
-        run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            RAW="${{ github.event.inputs.version }}"
-          else
-            RAW="${GITHUB_REF#refs/tags/}"
-          fi
-          echo "version=${RAW#v}" >> $GITHUB_OUTPUT
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -126,13 +117,13 @@ jobs:
       - name: Rename tarball to include version
         run: |
           mv pi-historian-flow.tar.gz \
-             pi-historian-flow_${{ steps.vars.outputs.version }}.tar.gz
+             pi-historian-flow_${{ needs.get-version.outputs.version }}.tar.gz
 
       - name: Upload flow artifact
         uses: actions/upload-artifact@v4.6.2
         with:
           name: pi-historian-flow-release
-          path: pi-historian-flow_${{ steps.vars.outputs.version }}.tar.gz
+          path: pi-historian-flow_${{ needs.get-version.outputs.version }}.tar.gz
 
   # ─────────────────────────────────────────────────────────
   # Job 4: Publish all artifacts to GitHub Release
@@ -140,7 +131,7 @@ jobs:
   publish-release:
     name: "Publish GitHub Release"
     runs-on: ubuntu-latest
-    needs: [build-standard, build-offline, build-pi-historian-flow]
+    needs: [get-version, build-standard, build-offline, build-pi-historian-flow]
 
     steps:
       - name: Download standard artifact
@@ -158,24 +149,15 @@ jobs:
         with:
           name: pi-historian-flow-release
 
-      - name: Extract tag for release
-        id: vars
-        run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "tag=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-          else
-            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-          fi
-
       - name: Create GitHub Release and upload assets
         uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ steps.vars.outputs.tag }}
-          name: "PI Historian Connector ${{ steps.vars.outputs.tag }}"
+          tag_name: ${{ needs.get-version.outputs.tag }}
+          name: "PI Historian Connector ${{ needs.get-version.outputs.tag }}"
           body: |
-            ## PI Historian Connector ${{ steps.vars.outputs.tag }}
+            ## PI Historian Connector ${{ needs.get-version.outputs.tag }}
 
             ### Assets
             | File | Description |
