@@ -10,7 +10,7 @@ pi_url = "http://localhost:8080/piwebapi"
 
 # PI Web API credentials
 pi_user     = "piuser"
-pi_password = "########"   # base64-encode your password first
+pi_password = "base64encodedpassword"   # base64-encode your password first
 
 # List of PI tag names to poll every 60 seconds
 datapoints = ["REACTOR01.TEMP","PUMP02.FLOW","COMPRESSOR.PRESSURE", "MOTOR01.SPEED","TANK01.LEVEL"]
