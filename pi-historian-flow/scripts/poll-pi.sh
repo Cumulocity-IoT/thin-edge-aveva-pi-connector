@@ -115,7 +115,7 @@ while true; do
         mapfile -t DATAPOINTS < <(param_arr datapoints)
     fi
 
-    DATAPOINTS_KEY="$(printf '%s\n' "${DATAPOINTS[@]}")"
+    DATAPOINTS_KEY="$(printf '%s\n' "${DATAPOINTS[@]}" | sort)"
     [[ "$DATAPOINTS_KEY" != "$PREV_DATAPOINTS_KEY" ]] && TWIN_CHANGED=true || TWIN_CHANGED=false
 
     if [[ -z "$PI_URL" || -z "$PI_USER" || ${#DATAPOINTS[@]} -eq 0 ]]; then
@@ -224,8 +224,9 @@ while true; do
     # --- emit remaining chunks ---
     emit_measurement "$CHUNK_MDATA"
     if [[ "$TWIN_CHANGED" == true ]]; then
-        emit_twin "$CHUNK_MTAGS"
-        PREV_DATAPOINTS_KEY="$DATAPOINTS_KEY"
+        if emit_twin "$CHUNK_MTAGS"; then
+            PREV_DATAPOINTS_KEY="$DATAPOINTS_KEY"
+        fi
     fi
 
     sleep "${POLL_INTERVAL:-60}"
