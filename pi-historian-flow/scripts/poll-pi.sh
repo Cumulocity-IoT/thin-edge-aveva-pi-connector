@@ -82,6 +82,7 @@ emit_twin() {
 }
 
 # --- main polling loop ---
+PREV_DATAPOINTS_KEY=""
 while true; do
 
     # Read PI connection config — re-read every cycle so remote updates take effect
@@ -113,6 +114,9 @@ while true; do
     else
         mapfile -t DATAPOINTS < <(param_arr datapoints)
     fi
+
+    DATAPOINTS_KEY="$(printf '%s\n' "${DATAPOINTS[@]}" | sort)"
+    [[ "$DATAPOINTS_KEY" != "$PREV_DATAPOINTS_KEY" ]] && TWIN_CHANGED=true || TWIN_CHANGED=false
 
     if [[ -z "$PI_URL" || -z "$PI_USER" || ${#DATAPOINTS[@]} -eq 0 ]]; then
         echo "[pi-historian] Missing PI_URL, PI_USER, or empty datapoints" \
@@ -202,22 +206,28 @@ while true; do
         CHUNK_MDATA="$NEW_MDATA"
 
         # -- chunk twin metadata payload --
-        NEW_MTAGS="$(echo "$CHUNK_MTAGS" | jq -c --arg k "$KEY" --arg d "$DESCRIPTOR" \
-            '. + {($k):{description:$d}}')"
-        CANDIDATE="$(jq -cn --arg ts "$TIMESTAMP" --argjson tags "$NEW_MTAGS" \
-            '{"tags":$tags,"lastUpdated":$ts}')"
-        if [[ "$(bytecount "$CANDIDATE")" -gt "$MAX_PAYLOAD_BYTES" ]]; then
-            emit_twin "$CHUNK_MTAGS"
-            NEW_MTAGS="$(jq -cn --arg k "$KEY" --arg d "$DESCRIPTOR" '{($k):{description:$d}}')"
+        if [[ "$TWIN_CHANGED" == true ]]; then
+            NEW_MTAGS="$(echo "$CHUNK_MTAGS" | jq -c --arg k "$KEY" --arg d "$DESCRIPTOR" \
+                '. + {($k):{description:$d}}')"
+            CANDIDATE="$(jq -cn --arg ts "$TIMESTAMP" --argjson tags "$NEW_MTAGS" \
+                '{"tags":$tags,"lastUpdated":$ts}')"
+            if [[ "$(bytecount "$CANDIDATE")" -gt "$MAX_PAYLOAD_BYTES" ]]; then
+                emit_twin "$CHUNK_MTAGS"
+                NEW_MTAGS="$(jq -cn --arg k "$KEY" --arg d "$DESCRIPTOR" '{($k):{description:$d}}')"
+            fi
+            CHUNK_MTAGS="$NEW_MTAGS"
         fi
-        CHUNK_MTAGS="$NEW_MTAGS"
 
         [[ "$DEBUG" == "true" ]] && echo "[pi-historian] $TAG → $ENTRY" >&2
     done
 
     # --- emit remaining chunks ---
     emit_measurement "$CHUNK_MDATA"
-    emit_twin "$CHUNK_MTAGS"
+    if [[ "$TWIN_CHANGED" == true ]]; then
+        if emit_twin "$CHUNK_MTAGS"; then
+            PREV_DATAPOINTS_KEY="$DATAPOINTS_KEY"
+        fi
+    fi
 
     sleep "${POLL_INTERVAL:-60}"
 done
