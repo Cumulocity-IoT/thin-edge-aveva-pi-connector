@@ -14,6 +14,7 @@ A Python-based service for [thin-edge](https://thin-edge.io/) designed to read d
 - Real-time monitoring of configuration file changes
 - Dynamic reconfiguration without service restart
 - Digital and enumeration tag support (handles JSON/dict values from PI digital points)
+- Stable tag-to-batch assignment — each PI tag is permanently mapped to a batch ID regardless of adding or removing other tags
 - Application logs written to `/etc/tedge/c8y/logs/` (persisted on host via volume mount, daily rotation)
 
 ## Requirements
@@ -47,6 +48,16 @@ The following configuration files must be uploaded to the Cumulocity tenant for 
         "78FIQ301.A",
         "78FIC102.A"
     ]
+    ```
+
+- `tag_batches.json` *(auto-generated)*: Persistent ledger that records the batch ID assigned to every PI tag. Created automatically on first run at `/etc/tedge/c8y/tag_batches.json`. Do not edit manually. If accidentally deleted it is regenerated with identical assignments as long as `datapoints.json` has not changed.
+
+    ```json
+    {
+        "_num_batches": 2,
+        "78FIQ301_A": 0,
+        "78FIC102_A": 1
+    }
     ```
 
 Upload the above configuration files into Cumulocity → Configuration Management tab, like below.
@@ -294,6 +305,57 @@ docker compose down
 
 The container will be deployed and started automatically on the thin-edge VM.
 
+
+## Batch Assignment
+
+PI tags are grouped into batches before being published to MQTT. Each batch is published as a separate measurement type (`pi_historianMeasurement_batch<N>`) and metadata topic (`pi_historianMetadata_batch<N>`).
+
+### How batch IDs are assigned
+
+On first run (or if `tag_batches.json` is missing), the number of batches is computed as:
+
+```
+num_batches = ceil(total_tags / BATCH_SIZE)   # BATCH_SIZE default: 60
+```
+
+Each tag is then assigned a batch ID using a deterministic hash:
+
+```
+batch_id = md5(tag_name) % num_batches
+```
+
+The resulting mapping is saved to `/etc/tedge/c8y/tag_batches.json` alongside the `_num_batches` value used.
+
+### Stability guarantees
+
+| Scenario | Result |
+|---|---|
+| Tag added to `datapoints.json` | New tag hashed with the **stored** `_num_batches`; all existing tags keep their batch ID |
+| Tag removed from `datapoints.json` | Ledger entry is retained; re-adding the tag later restores the same batch ID |
+| `tag_batches.json` deleted accidentally | Regenerated automatically on next startup; assignments are **identical** if `datapoints.json` has not changed |
+| `datapoints.json` grows significantly across a `BATCH_SIZE` boundary after file deletion | `num_batches` is recomputed from the new list length; assignments regenerate with the new divisor |
+
+> **Do not modify `_num_batches` manually.** Changing it causes all tags to be remapped to new batch IDs, creating orphaned topics in Cumulocity.
+
+### Automatic backups
+
+Every time `tag_batches.json` is updated, the previous version is backed up automatically before the new content is written:
+
+- **Backup location:** `/etc/tedge/c8y/tag_batches_backups/`
+- **Naming format:** `tag_batches_YYYYMMDD_HHMMSS.json` (UTC timestamp)
+- **Retention:** last 10 backups are kept; older ones are deleted automatically
+
+```
+/etc/tedge/c8y/tag_batches_backups/
+  tag_batches_20260828_083000.json
+  tag_batches_20260828_091500.json
+  tag_batches_20260828_102300.json
+  ...  (max 10 files)
+```
+
+To restore a backup, copy the desired file back to `/etc/tedge/c8y/tag_batches.json` and restart the service.
+
+---
 
 ## MIT License
 
