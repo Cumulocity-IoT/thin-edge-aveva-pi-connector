@@ -37,9 +37,21 @@ The following configuration files must be uploaded to the Cumulocity tenant for 
         "POLL_INTERVAL": 60,
         "PI_USER": "default_user",
         "PI_PASSWORD": "default_password-base64-encoded",
-        "PI_URL": "https://default-url.com/piwebapi"
+        "PI_URL": "https://default-url.com/piwebapi",
+        "BATCH_SIZE": 60,
+        "MQTT_PUBLISH_TIMEOUT": 1
     }
     ```
+
+    | Key | Default | Description |
+    |---|---|---|
+    | `RECORDING_AT_TIME` | `"?time="` | Query string prefix used when requesting a value at a specific timestamp from PI Web API. |
+    | `POLL_INTERVAL` | `60` | Seconds between data collection cycles. |
+    | `PI_USER` | — | PI Web API username. |
+    | `PI_PASSWORD` | — | PI Web API password, base64-encoded. |
+    | `PI_URL` | — | Full base URL of the PI Web API server. |
+    | `BATCH_SIZE` | `60` | Maximum number of PI tags per MQTT measurement batch. Only used when `tag_batches.json` does not yet exist (first run). Changing it after the first run has no effect unless `tag_batches.json` is deleted. |
+    | `MQTT_PUBLISH_TIMEOUT` | `1` | Seconds to wait for MQTT publish acknowledgement. A warning is logged if the message is not confirmed within this window. |
 
 - `datapoints.json`: List of PI tags to read and publish to Cumulocity, with optional friendly names.
 
@@ -354,6 +366,32 @@ Every time `tag_batches.json` is updated, the previous version is backed up auto
 ```
 
 To restore a backup, copy the desired file back to `/etc/tedge/c8y/tag_batches.json` and restart the service.
+
+### Supported operations
+
+The following operations are safe and fully supported at any point in the service lifecycle.
+
+| Operation | How | What happens |
+|---|---|---|
+| **Add new PI tags** | Append entries to `datapoints.json` | Each new tag is hashed and assigned to a batch immediately on the next file-change event. All existing tag-to-batch assignments stay unchanged. |
+| **Remove PI tags** | Delete entries from `datapoints.json` | The tag stops being polled and published. Its ledger entry is kept in `tag_batches.json`, so re-adding the same tag name later restores the exact same batch ID. |
+| **Rebalance / resize batches** | Delete `tag_batches.json` while the full desired tag list is already in `datapoints.json`, then restart | `num_batches` is recomputed from the current list length, giving an evenly distributed layout. Do this only intentionally — all tags move to new batch IDs and existing Cumulocity measurement topics become orphans. |
+| **Restore a previous batch layout** | Copy the desired file from `/etc/tedge/c8y/tag_batches_backups/` back to `/etc/tedge/c8y/tag_batches.json`, then restart | The service picks up the restored ledger and resumes publishing under the batch IDs it contained. |
+| **Change poll interval** | Update `POLL_INTERVAL` in `pi_config.json` and push via Cumulocity | Takes effect on the next configuration reload without a restart. |
+| **Scale the tag list** | Keep adding tags to `datapoints.json` | Each tag is assigned via the stored `_num_batches` divisor. Batches may grow beyond `BATCH_SIZE` over time; rebalance when needed (see row above). |
+| **Inspect current batch layout** | Read `/etc/tedge/c8y/tag_batches.json` | Shows the batch ID for every known tag and the `_num_batches` divisor in use. |
+
+### Limitations and what not to do
+
+| # | What not to do | Why |
+|---|---|---|
+| 1 | **Do not change `BATCH_SIZE` after initial deployment** | `BATCH_SIZE` determines `num_batches` on first run. Changing it and then deleting `tag_batches.json` causes a different `num_batches`, remapping all tags to new batch IDs and orphaning existing Cumulocity topics. |
+| 2 | **Do not modify `_num_batches` in `tag_batches.json` manually** | `_num_batches` is the frozen divisor used by the hash formula. Any change causes every tag to resolve to a different batch ID on the next restart. |
+| 3 | **Do not manually edit tag entries in `tag_batches.json`** | Incorrect or duplicate entries will cause tags to be published under the wrong batch topic or skipped entirely. Use backups to restore if the file is corrupted. |
+| 4 | **Do not rename a PI tag without updating the ledger** | A renamed tag is treated as a completely new tag — it is assigned a new batch ID via the hash. The old entry remains in the ledger as an orphan and the old Cumulocity topic will stop receiving data. |
+| 5 | **Do not delete `tag_batches.json` after significantly growing the tag list** | If `len(tags)` has crossed a `BATCH_SIZE` boundary since the file was first generated, deletion triggers a recompute of `num_batches` with a different value, remapping all existing tags. |
+| 6 | **Do not expect batch sizes to stay exactly at `BATCH_SIZE` after repeated tag additions** | `_num_batches` is frozen after first run. As new tags accumulate, some batches will exceed `BATCH_SIZE`. To rebalance, delete `tag_batches.json` with the current full tag list in place so it is regenerated with an updated `num_batches`. |
+| 7 | **Do not push `tag_batches.json` via Cumulocity Configuration Management** | The file is managed entirely by the application. Pushing it from Cumulocity would trigger the file watcher and reload datapoints, but the file would be overwritten again on the next tag list change. |
 
 ---
 
