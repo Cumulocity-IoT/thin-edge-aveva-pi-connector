@@ -1,15 +1,17 @@
 import os
+import math
 import time
 import json
 import random
+import shutil
 import base64
+import hashlib
 import logging
 import logging.config
 import urllib3
 import requests
-import base64
 from datetime import datetime, timezone, timedelta
-from typing import Optional, Dict, Any, Iterable
+from typing import Optional, Dict, Any, Iterable, List
 from logging.handlers import RotatingFileHandler
 from requests.auth import HTTPBasicAuth
 from watchdog.observers import Observer
@@ -30,7 +32,8 @@ log.info("Log rotation setup successfully!")
 # Configuration
 CONFIG = {
     "PI_DATAPOINTS_FILE": "/etc/tedge/c8y/datapoints.json",
-    "MQTT_BROKER": "host.containers.internal",
+    #"MQTT_BROKER": "host.containers.internal",
+    "MQTT_BROKER": "localhost",
     "MQTT_PORT": 1883,
     "HTTP_PORT": 8001,
     "MQTT_MEASUREMENT_TOPIC": "c8y/measurement/measurements/create",
@@ -43,15 +46,21 @@ CONFIG = {
     "RECORDING_AT_TIME": "?time=",
     "POLL_INTERVAL": 60,
     "MEASUREMENT_TYPE": "pi_historianMeasurement",
-    "METADATA_TYPE": "pi_historianMetadata"
+    "METADATA_TYPE": "pi_historianMetadata",
+    "BATCH_SIZE": 60,
+    "MQTT_PUBLISH_TIMEOUT": 1,
+    "BATCH_ASSIGNMENT_FILE": "/etc/tedge/c8y/tag_batches.json"
 }
 
 # Globals
 pi_config: Dict[str, Any] = {}
 datapoint_list: Iterable[str] = []
+tag_batches: Dict[int, List[str]] = {}
 mqtt_client: Optional[mqtt.Client] = None
 pi_client = None
 pi_auth = None
+metadata_publish_count: int = 0
+measurement_publish_count: int = 0
 
 
 # ---- Utility Functions ----
@@ -90,7 +99,7 @@ def load_configuration():
 
 
 def load_datapoints():
-    global datapoint_list
+    global datapoint_list, tag_batches
     raw_datapoints = read_json_file(CONFIG["PI_DATAPOINTS_FILE"])
     if isinstance(raw_datapoints, list):
         datapoint_list = raw_datapoints
@@ -101,6 +110,8 @@ def load_datapoints():
 
     if not datapoint_list:
         log.warning("Empty datapoints file.")
+    tag_batches = assign_batches(datapoint_list)
+    log.info("Assigned %d tags to %d batches.", len(datapoint_list), len(tag_batches))
     update_tag_metadata()
 
 def connect_mqtt():
@@ -118,10 +129,16 @@ def connect_mqtt():
     mqtt_client.connect(CONFIG["MQTT_BROKER"], CONFIG["MQTT_PORT"], 60)
     mqtt_client.loop_start()
 
-def publish_msg(topic: str, msg: dict):
+def publish_msg(topic: str, msg: str):
     if mqtt_client:
-        mqtt_client.publish(topic, msg)
-        log.info(f"Published: {msg}, on topic: {topic}")
+        timeout = CONFIG.get("MQTT_PUBLISH_TIMEOUT", 1)
+        result = mqtt_client.publish(topic, msg)
+        result.wait_for_publish(timeout=timeout)
+        size_kb = len(msg.encode("utf-8")) / 1024 if isinstance(msg, str) else len(str(msg).encode("utf-8")) / 1024
+        if not result.is_published():
+            log.warning("MQTT publish timed out after %ss on topic: %s (%.2f KB)", timeout, topic, size_kb)
+        else:
+            log.info("Published on topic: %s (%.2f KB)", topic, size_kb)
     else:
         log.error("MQTT client is not connected.")
 
@@ -198,8 +215,9 @@ def start_file_watcher() -> Optional[object]:
     return observer
 
 def update_tag_metadata():
+    global metadata_publish_count
     try:
-        if not datapoint_list:
+        if not tag_batches:
             log.warning("Skipping metadata update: no datapoints loaded.")
             return
 
@@ -208,25 +226,25 @@ def update_tag_metadata():
             log.error("Skipping metadata update: unable to connect to PI or resolve datapoints link.")
             return
 
-        dataSeries = {}
-        for key in datapoint_list:
-            dp = get_pi_datapoints(link, key)
-            if not dp:
-                log.error(f"Skipping metadata for datapoint '{key}': PI query failed.")
-                continue
+        for batch_id, tags in tag_batches.items():
+            data_series = {}
+            for key in tags:
+                dp = get_pi_datapoints(link, key)
+                if not dp:
+                    log.error("Skipping metadata for '%s': PI query failed.", key)
+                    continue
+                data_series[key.replace(".", "_")] = {"description": dp.get("Descriptor")}
 
-            dataSeries[key.replace(".", "_")] = {
-                "description": dp.get("Descriptor")
-            }
-
-        payload = {
-                "tags": dataSeries,
+            metadata_publish_count += 1
+            payload = {
+                "tags": data_series,
                 "lastUpdated": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z')
-        }
-        publish_msg(f"{CONFIG['MQTT_INVENTORY_TOPIC']}/{CONFIG['METADATA_TYPE']}", json.dumps(payload, indent=4))
-        log.info("tag metadata updated successfully")
+            }
+            topic = f"{CONFIG['MQTT_INVENTORY_TOPIC']}/{CONFIG['METADATA_TYPE']}_batch{batch_id}"
+            publish_msg(topic, json.dumps(payload, indent=4))
+            log.info("Metadata published for batch %d (%d tags) [metadata_publish_count=%d].", batch_id, len(tags), metadata_publish_count)
     except Exception as e:
-        log.error(f"Metadata update failed: {e}")
+        log.error("Metadata update failed: %s", e)
 
 def classify_value(value_str):
     # Try parsing as float (numerical)
@@ -235,18 +253,81 @@ def classify_value(value_str):
         return "Numerical"
     except (ValueError, TypeError):
         pass
-    
+
     # Try parsing as JSON (e.g., dict)
     try:
        if isinstance(value_str, dict):
             return "JSON"
     except json.JSONDecodeError:
         pass
-    
+
     return "Unknown"
+
+def backup_batch_assignments():
+    src = CONFIG["BATCH_ASSIGNMENT_FILE"]
+    if not os.path.exists(src):
+        return
+    backup_dir = os.path.join(os.path.dirname(src), "tag_batches_backups")
+    os.makedirs(backup_dir, exist_ok=True)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    dst = os.path.join(backup_dir, f"tag_batches_{timestamp}.json")
+    try:
+        shutil.copy2(src, dst)
+        backups = sorted(f for f in os.listdir(backup_dir) if f.startswith("tag_batches_") and f.endswith(".json"))
+        for old in backups[:-10]:
+            os.remove(os.path.join(backup_dir, old))
+        log.info("Backup saved: %s (%d/10 backups retained).", dst, min(len(backups), 10))
+    except Exception as e:
+        log.error("Failed to backup tag_batches.json: %s", e)
+
+def save_batch_assignments(ledger: Dict[str, Any]):
+    backup_batch_assignments()
+    path = CONFIG["BATCH_ASSIGNMENT_FILE"]
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(ledger, f, indent=4)
+        log.info("Saved batch assignments (%d tags) to %s.", len(ledger) - 1, path)
+    except Exception as e:
+        log.error("Failed to save batch assignments to %s: %s", path, e)
+
+def assign_batches(tags: list) -> Dict[int, List[str]]:
+    batch_size = CONFIG.get("BATCH_SIZE", 60)
+    ledger_path = CONFIG["BATCH_ASSIGNMENT_FILE"]
+    ledger: Dict[str, Any] = read_json_file(ledger_path) if os.path.exists(ledger_path) else {}
+
+    if (
+        isinstance(ledger, dict)
+        and type(ledger.get("_num_batches")) is int
+        and ledger["_num_batches"] > 0
+    ):
+        # Reuse the stored divisor so existing batch IDs never shift
+        num_batches = ledger["_num_batches"]
+        changed = False
+    else:
+        # First run, file deletion, or an invalid ledger: recompute the divisor.
+        ledger = {}
+        num_batches = math.ceil(len(tags) / batch_size) if tags else 1
+        ledger["_num_batches"] = num_batches
+        changed = True
+
+    for tag in tags:
+        if tag not in ledger:
+            ledger[tag] = int(hashlib.md5(tag.encode()).hexdigest(), 16) % num_batches
+            changed = True
+
+    if changed:
+        save_batch_assignments(ledger)
+
+    batches: Dict[int, List[str]] = {}
+    for tag in tags:
+        bid = ledger[tag]
+        batches.setdefault(bid, []).append(tag)
+
+    return batches
 
 # ---- Main Logic ----
 def main():
+    global measurement_publish_count, metadata_publish_count
     try:
         load_configuration()
     except Exception as e:
@@ -269,7 +350,9 @@ def main():
 
     while True:
         try:
-            log.info("Starting data collection cycle...")
+            measurement_publish_count = 0
+            metadata_publish_count = 0
+            log.info("Starting data collection cycle... [measurement_publish_count=%d]", measurement_publish_count)
             link = get_datapoints_link()
 
             if not link:
@@ -277,42 +360,47 @@ def main():
                 continue
 
             timestamp = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z')
-            data = {}
 
-            for key in datapoint_list:
-                dp = get_pi_datapoints(link, key)
-                if not dp or not dp.get("RecordedData"):
+            for batch_id, tags in tag_batches.items():
+                batch_data = {}
+                batch_type = f"{CONFIG['MEASUREMENT_TYPE']}_batch{batch_id}"
+
+                for key in tags:
+                    dp = get_pi_datapoints(link, key)
+                    if not dp or not dp.get("RecordedData"):
+                        continue
+
+                    value = get_recorded_data(dp["RecordedData"], timestamp)
+                    if value is None:
+                        continue
+
+                    series = key.replace(".", "_")
+                    unit = dp.get("EngineeringUnits", "")
+
+                    value_type = classify_value(value)
+                    if value_type == "JSON" and isinstance(value, dict):
+                        log.info("JSON value for key: %s, value: %s", key, value)
+                        batch_data[series] = {
+                            "value": value.get("Value"),
+                            "unit": unit,
+                            "stringValue": value.get("Name")
+                        }
+                    else:
+                        batch_data[series] = {"value": value, "unit": unit}
+
+                if not batch_data:
+                    log.info("Batch %d: no data collected, skipping publish.", batch_id)
                     continue
 
-                value = get_recorded_data(dp["RecordedData"], timestamp)
-                if value is None:
-                    continue
-
-                series = key.replace(".", "_")
-                unit = dp.get("EngineeringUnits", "")
-
-                value_type = classify_value(value)
-                if value_type == "JSON" and isinstance(value, dict):
-                    log.info(f"JSON value for key: {key}, value: {value}")
-                    data[series] = {
-                        "value": value.get("Value"),
-                        "unit": unit,
-                        "stringValue": value.get("Name")
-                    }
-                    continue
-
-                data[series] = {
-                    "value": value,
-                    "unit": unit
+                payload = {
+                    "type": batch_type,
+                    "time": timestamp,
+                    batch_type: batch_data
                 }
+                measurement_publish_count += 1
+                publish_msg(CONFIG["MQTT_MEASUREMENT_TOPIC"], json.dumps(payload, indent=4))
+                log.info("Published batch %d (%d series) [measurement_publish_count=%d].", batch_id, len(batch_data), measurement_publish_count)
 
-            payload = {
-                "type": CONFIG['MEASUREMENT_TYPE'],
-                "time": timestamp,
-                CONFIG['MEASUREMENT_TYPE']: data
-            }
-
-            publish_msg(CONFIG["MQTT_MEASUREMENT_TOPIC"], json.dumps(payload, indent=4))
             time.sleep(CONFIG["POLL_INTERVAL"])
 
         except Exception as e:
