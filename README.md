@@ -67,8 +67,8 @@ The following configuration files must be uploaded to the Cumulocity tenant for 
     ```json
     {
         "_num_batches": 2,
-        "78FIQ301_A": 0,
-        "78FIC102_A": 1
+        "78FIQ301.A": 0,
+        "78FIC102.A": 1
     }
     ```
 

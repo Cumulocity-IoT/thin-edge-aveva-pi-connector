@@ -10,7 +10,6 @@ import logging
 import logging.config
 import urllib3
 import requests
-import base64
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, Iterable, List
 from logging.handlers import RotatingFileHandler
@@ -129,7 +128,7 @@ def connect_mqtt():
     mqtt_client.connect(CONFIG["MQTT_BROKER"], CONFIG["MQTT_PORT"], 60)
     mqtt_client.loop_start()
 
-def publish_msg(topic: str, msg: dict):
+def publish_msg(topic: str, msg: str):
     if mqtt_client:
         timeout = CONFIG.get("MQTT_PUBLISH_TIMEOUT", 1)
         result = mqtt_client.publish(topic, msg)
@@ -292,14 +291,20 @@ def save_batch_assignments(ledger: Dict[str, Any]):
 
 def assign_batches(tags: list) -> Dict[int, List[str]]:
     batch_size = CONFIG.get("BATCH_SIZE", 60)
-    ledger: Dict[str, Any] = read_json_file(CONFIG["BATCH_ASSIGNMENT_FILE"])
+    ledger_path = CONFIG["BATCH_ASSIGNMENT_FILE"]
+    ledger: Dict[str, Any] = read_json_file(ledger_path) if os.path.exists(ledger_path) else {}
 
-    if ledger and "_num_batches" in ledger:
+    if (
+        isinstance(ledger, dict)
+        and type(ledger.get("_num_batches")) is int
+        and ledger["_num_batches"] > 0
+    ):
         # Reuse the stored divisor so existing batch IDs never shift
         num_batches = ledger["_num_batches"]
         changed = False
     else:
-        # First run or file was deleted: compute from current tag list
+        # First run, file deletion, or an invalid ledger: recompute the divisor.
+        ledger = {}
         num_batches = math.ceil(len(tags) / batch_size) if tags else 1
         ledger["_num_batches"] = num_batches
         changed = True
@@ -321,7 +326,7 @@ def assign_batches(tags: list) -> Dict[int, List[str]]:
 
 # ---- Main Logic ----
 def main():
-    global measurement_publish_count
+    global measurement_publish_count, metadata_publish_count
     try:
         load_configuration()
     except Exception as e:
