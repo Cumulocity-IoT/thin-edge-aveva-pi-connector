@@ -146,7 +146,11 @@ def get_datapoints_link() -> Optional[str]:
     try:
         response = pi_client.get(f"{CONFIG['PI_URL']}/dataservers", auth=pi_auth, headers=CONFIG["PI_HEADERS"], verify=False)
         response.raise_for_status()
-        return response.json().get("Items", [{}])[0].get("Links", {}).get("Points")
+        items = response.json().get("Items", [])
+        if not items:
+            log.error("Error retrieving datapoints link: PI Web API returned no data servers (empty Items list).")
+            return None
+        return items[0].get("Links", {}).get("Points")
     except Exception as e:
         log.error(f"Error retrieving datapoints link: {e}")
         return None
@@ -156,7 +160,11 @@ def get_pi_datapoints(datapoints_link: str, name_filter: str) -> Optional[Dict[s
         url = f"{datapoints_link}{CONFIG['QUERY_FILTER']}{name_filter}"
         response = pi_client.get(url, auth=pi_auth, headers=CONFIG["PI_HEADERS"], verify=False)
         response.raise_for_status()
-        item = response.json().get("Items", [{}])[0]
+        items = response.json().get("Items", [])
+        if not items:
+            log.error(f"Failed to get PI datapoint {name_filter}: PI Web API returned no matching point (empty Items list). Verify the tag name exists in PI.")
+            return None
+        item = items[0]
         return {
             "Descriptor": item.get("Descriptor"),
             "EngineeringUnits": item.get("EngineeringUnits"),

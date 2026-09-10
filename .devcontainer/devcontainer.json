@@ -12,7 +12,7 @@
   ],
 
   "mounts": [
-    "source=/etc/tedge/c8y,target=/etc/tedge/c8y,type=bind"
+    "source=/Users/vachaspatidiwevedi/Documents/workspace_vscode/thin-edge-aveva-pi-connector/mnt,target=/etc/tedge/c8y,type=bind"
     // removed: /sys/fs/cgroup bind mount  ← this was killing the container on WSL2
   ],
 
