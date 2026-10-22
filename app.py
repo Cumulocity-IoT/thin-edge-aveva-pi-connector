@@ -1,11 +1,9 @@
 import os
-import math
 import time
 import json
 import random
 import shutil
 import base64
-import hashlib
 import logging
 import logging.config
 import urllib3
@@ -48,6 +46,8 @@ CONFIG = {
     "METADATA_TYPE": "pi_historianMetadata",
     "BATCH_SIZE": 60,
     "MQTT_PUBLISH_TIMEOUT": 1,
+    "MQTT_MAX_PAYLOAD_KB": 16,
+    "MQTT_PAYLOAD_RESERVE_BYTES": 512,
     "BATCH_ASSIGNMENT_FILE": "/etc/tedge/c8y/tag_batches.json"
 }
 
@@ -93,6 +93,10 @@ def load_configuration():
     CONFIG.update(pi_config)
     if not pi_config:
         log.error("No valid pi_config.json found, using existing configuration.")
+    max_kb = CONFIG.get("MQTT_MAX_PAYLOAD_KB")
+    if isinstance(max_kb, bool) or not isinstance(max_kb, (int, float)) or not 1 <= max_kb <= 16:
+        log.error("Invalid MQTT_MAX_PAYLOAD_KB %r (must be a number between 1 and 16), falling back to 16.", max_kb)
+        CONFIG["MQTT_MAX_PAYLOAD_KB"] = 16
     init_pi_session()
     log.info("Configuration loaded successfully. PI_URL=%s, POLL_INTERVAL=%s", CONFIG.get("PI_URL"), CONFIG.get("POLL_INTERVAL"))
 
@@ -109,6 +113,12 @@ def load_datapoints():
 
     if not datapoint_list:
         log.warning("Empty datapoints file.")
+    series_names: Dict[str, str] = {}
+    for tag in datapoint_list:
+        series = tag.replace(".", "_")
+        if series in series_names and series_names[series] != tag:
+            log.warning("Tags '%s' and '%s' both map to series name '%s'; one will overwrite the other.", series_names[series], tag, series)
+        series_names.setdefault(series, tag)
     tag_batches = assign_batches(datapoint_list)
     log.info("Assigned %d tags to %d batches.", len(datapoint_list), len(tag_batches))
     update_tag_metadata()
@@ -131,15 +141,65 @@ def connect_mqtt():
 def publish_msg(topic: str, msg: str):
     if mqtt_client:
         timeout = CONFIG.get("MQTT_PUBLISH_TIMEOUT", 1)
+        size_kb = len(msg.encode("utf-8")) / 1024
+        max_kb = CONFIG["MQTT_MAX_PAYLOAD_KB"]
+        if size_kb > max_kb:
+            log.error("MQTT payload on topic %s is %.2f KB, above the %s KB limit even after splitting; it may be rejected by Cumulocity.", topic, size_kb, max_kb)
         result = mqtt_client.publish(topic, msg)
         result.wait_for_publish(timeout=timeout)
-        size_kb = len(msg.encode("utf-8")) / 1024 if isinstance(msg, str) else len(str(msg).encode("utf-8")) / 1024
         if not result.is_published():
             log.warning("MQTT publish timed out after %ss on topic: %s (%.2f KB)", timeout, topic, size_kb)
         else:
             log.info("Published on topic: %s (%.2f KB)", topic, size_kb)
     else:
         log.error("MQTT client is not connected.")
+
+def split_series(series: Dict[str, Any], build_payload, shrink=None) -> List[str]:
+    """Serialize build_payload(chunk) for chunks of series, each kept under MQTT_MAX_PAYLOAD_KB
+    minus MQTT_PAYLOAD_RESERVE_BYTES (headroom for thin-edge mapper wrapping and protocol overhead).
+
+    build_payload must embed the chunk dict exactly once, so compact JSON size is
+    len(build_payload({})) + sum of the "key":value entries + the commas between them.
+    If a single entry cannot fit on its own, shrink(key, value, max_entry_bytes) may return a smaller value.
+    """
+    max_bytes = int(CONFIG["MQTT_MAX_PAYLOAD_KB"] * 1024) - CONFIG["MQTT_PAYLOAD_RESERVE_BYTES"]
+    dumps = lambda obj: json.dumps(obj, separators=(",", ":"))
+    base = len(dumps(build_payload({})))
+
+    chunks: List[Dict[str, Any]] = []
+    chunk: Dict[str, Any] = {}
+    size = base
+    for key, value in series.items():
+        if shrink and base + len(dumps(key)) + 1 + len(dumps(value)) > max_bytes:
+            value = shrink(key, value, max_bytes - base)
+        entry = len(dumps(key)) + 1 + len(dumps(value)) + (1 if chunk else 0)
+        if chunk and size + entry > max_bytes:
+            chunks.append(chunk)
+            chunk, size = {}, base
+            entry -= 1
+        chunk[key] = value
+        size += entry
+    if chunk:
+        chunks.append(chunk)
+
+    return [dumps(build_payload(c)) for c in chunks]
+
+def shorten_description(key: str, value: Dict[str, Any], max_entry_bytes: int) -> Dict[str, Any]:
+    """Truncate the description so the "key":value entry fits in max_entry_bytes of compact JSON."""
+    desc = value.get("description")
+    if not isinstance(desc, str):
+        return value
+    entry_size = lambda d: len(json.dumps(key)) + 1 + len(json.dumps({"description": d}, separators=(",", ":")))
+    # Binary search on characters, since JSON escaping makes bytes per character vary.
+    lo, hi = 0, len(desc)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if entry_size(desc[:mid] + "...") <= max_entry_bytes:
+            lo = mid
+        else:
+            hi = mid - 1
+    log.warning("Description for '%s' is too large for one MQTT message; truncated from %d to %d characters.", key, len(desc), lo)
+    return {**value, "description": desc[:lo] + "..."}
 
 def get_datapoints_link() -> Optional[str]:
     try:
@@ -223,17 +283,18 @@ def start_file_watcher() -> Optional[object]:
 
 def update_tag_metadata():
     global metadata_publish_count
-    try:
-        if not tag_batches:
-            log.warning("Skipping metadata update: no datapoints loaded.")
-            return
+    if not tag_batches:
+        log.warning("Skipping metadata update: no datapoints loaded.")
+        return
 
-        link = get_datapoints_link()
-        if not link:
-            log.error("Skipping metadata update: unable to connect to PI or resolve datapoints link.")
-            return
+    link = get_datapoints_link()
+    if not link:
+        log.error("Skipping metadata update: unable to connect to PI or resolve datapoints link.")
+        return
 
-        for batch_id, tags in tag_batches.items():
+    for batch_id, tags in tag_batches.items():
+        # Isolate each batch so a failure in one does not skip metadata for the rest.
+        try:
             data_series = {}
             for key in tags:
                 dp = get_pi_datapoints(link, key)
@@ -242,16 +303,17 @@ def update_tag_metadata():
                     continue
                 data_series[key.replace(".", "_")] = {"description": dp.get("Descriptor")}
 
-            metadata_publish_count += 1
-            payload = {
-                "tags": data_series,
-                "lastUpdated": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z')
-            }
-            topic = f"{CONFIG['MQTT_INVENTORY_TOPIC']}/{CONFIG['METADATA_TYPE']}_batch{batch_id}"
-            publish_msg(topic, json.dumps(payload, indent=4))
-            log.info("Metadata published for batch %d (%d tags) [metadata_publish_count=%d].", batch_id, len(tags), metadata_publish_count)
-    except Exception as e:
-        log.error("Metadata update failed: %s", e)
+            last_updated = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z')
+            messages = split_series(data_series, lambda chunk: {"tags": chunk, "lastUpdated": last_updated}, shrink=shorten_description)
+            # A twin publish replaces the whole fragment, so each extra part needs its own fragment name.
+            fragment = f"{CONFIG['METADATA_TYPE']}_batch{batch_id}"
+            for part, msg in enumerate(messages, start=1):
+                metadata_publish_count += 1
+                topic = f"{CONFIG['MQTT_INVENTORY_TOPIC']}/{fragment}" + (f"_part{part}" if part > 1 else "")
+                publish_msg(topic, msg)
+            log.info("Metadata published for batch %d (%d tags, %d part(s)) [metadata_publish_count=%d].", batch_id, len(tags), len(messages), metadata_publish_count)
+        except Exception as e:
+            log.error("Metadata update failed for batch %d: %s", batch_id, e)
 
 def classify_value(value_str):
     # Try parsing as float (numerical)
@@ -299,27 +361,47 @@ def save_batch_assignments(ledger: Dict[str, Any]):
 
 def assign_batches(tags: list) -> Dict[int, List[str]]:
     batch_size = CONFIG.get("BATCH_SIZE", 60)
+    if type(batch_size) is not int or batch_size <= 0:
+        log.error("Invalid BATCH_SIZE %r, falling back to 60.", batch_size)
+        batch_size = 60
     ledger_path = CONFIG["BATCH_ASSIGNMENT_FILE"]
     ledger: Dict[str, Any] = read_json_file(ledger_path) if os.path.exists(ledger_path) else {}
-
-    if (
-        isinstance(ledger, dict)
-        and type(ledger.get("_num_batches")) is int
-        and ledger["_num_batches"] > 0
-    ):
-        # Reuse the stored divisor so existing batch IDs never shift
-        num_batches = ledger["_num_batches"]
-        changed = False
-    else:
-        # First run, file deletion, or an invalid ledger: recompute the divisor.
+    if not isinstance(ledger, dict):
         ledger = {}
-        num_batches = math.ceil(len(tags) / batch_size) if tags else 1
-        ledger["_num_batches"] = num_batches
+    changed = False
+
+    # Drop entries with an invalid batch ID so those tags get reassigned below.
+    for tag in [t for t, bid in ledger.items() if t != "_num_batches" and (type(bid) is not int or bid < 0)]:
+        log.warning("Invalid batch ID %r for tag '%s' in ledger, reassigning.", ledger[tag], tag)
+        del ledger[tag]
         changed = True
 
+    # Count every ledger entry, including removed tags, so a re-added tag never pushes its batch over the limit.
+    counts: Dict[int, int] = {}
+    for tag, bid in ledger.items():
+        if tag != "_num_batches":
+            counts[bid] = counts.get(bid, 0) + 1
+
+    for bid, count in sorted(counts.items()):
+        if count > batch_size:
+            log.warning("Batch %d holds %d tags, above BATCH_SIZE=%d. Existing tags are not moved; new tags go to other batches.", bid, count, batch_size)
+
+    # Existing tags keep their batch ID forever. New tags fill the lowest-numbered batch with room,
+    # and a new batch is opened only when all existing ones are full.
+    next_bid = 0
     for tag in tags:
-        if tag not in ledger:
-            ledger[tag] = int(hashlib.md5(tag.encode()).hexdigest(), 16) % num_batches
+        if tag in ledger:
+            continue
+        while counts.get(next_bid, 0) >= batch_size:
+            next_bid += 1
+        ledger[tag] = next_bid
+        counts[next_bid] = counts.get(next_bid, 0) + 1
+        changed = True
+
+    if counts:
+        num_batches = max(counts) + 1
+        if ledger.get("_num_batches") != num_batches:
+            ledger["_num_batches"] = num_batches
             changed = True
 
     if changed:
@@ -399,14 +481,12 @@ def main():
                     log.info("Batch %d: no data collected, skipping publish.", batch_id)
                     continue
 
-                payload = {
-                    "type": batch_type,
-                    "time": timestamp,
-                    batch_type: batch_data
-                }
-                measurement_publish_count += 1
-                publish_msg(CONFIG["MQTT_MEASUREMENT_TOPIC"], json.dumps(payload, indent=4))
-                log.info("Published batch %d (%d series) [measurement_publish_count=%d].", batch_id, len(batch_data), measurement_publish_count)
+                # Each part becomes its own measurement with the same type and time, so no series is lost.
+                messages = split_series(batch_data, lambda chunk: {"type": batch_type, "time": timestamp, batch_type: chunk})
+                for msg in messages:
+                    measurement_publish_count += 1
+                    publish_msg(CONFIG["MQTT_MEASUREMENT_TOPIC"], msg)
+                log.info("Published batch %d (%d series, %d part(s)) [measurement_publish_count=%d].", batch_id, len(batch_data), len(messages), measurement_publish_count)
 
             time.sleep(CONFIG["POLL_INTERVAL"])
 
