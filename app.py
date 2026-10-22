@@ -90,13 +90,18 @@ def init_pi_session():
 def load_configuration():
     global pi_config
     pi_config = read_json_file(CONFIG["PI_CONFIG"])
-    CONFIG.update(pi_config)
     if not pi_config:
         log.error("No valid pi_config.json found, using existing configuration.")
-    max_kb = CONFIG.get("MQTT_MAX_PAYLOAD_KB")
+    # Validate payload limits before CONFIG.update, so the publishing thread never sees an invalid value during a reload.
+    max_kb = pi_config.get("MQTT_MAX_PAYLOAD_KB", CONFIG["MQTT_MAX_PAYLOAD_KB"])
     if isinstance(max_kb, bool) or not isinstance(max_kb, (int, float)) or not 1 <= max_kb <= 16:
         log.error("Invalid MQTT_MAX_PAYLOAD_KB %r (must be a number between 1 and 16), falling back to 16.", max_kb)
-        CONFIG["MQTT_MAX_PAYLOAD_KB"] = 16
+        pi_config["MQTT_MAX_PAYLOAD_KB"] = 16
+    reserve = pi_config.get("MQTT_PAYLOAD_RESERVE_BYTES", CONFIG["MQTT_PAYLOAD_RESERVE_BYTES"])
+    if type(reserve) is not int or not 0 <= reserve <= 4096:
+        log.error("Invalid MQTT_PAYLOAD_RESERVE_BYTES %r (must be an integer between 0 and 4096), falling back to 512.", reserve)
+        pi_config["MQTT_PAYLOAD_RESERVE_BYTES"] = 512
+    CONFIG.update(pi_config)
     init_pi_session()
     log.info("Configuration loaded successfully. PI_URL=%s, POLL_INTERVAL=%s", CONFIG.get("PI_URL"), CONFIG.get("POLL_INTERVAL"))
 
@@ -138,13 +143,19 @@ def connect_mqtt():
     mqtt_client.connect(CONFIG["MQTT_BROKER"], CONFIG["MQTT_PORT"], 60)
     mqtt_client.loop_start()
 
+def max_payload_bytes() -> int:
+    """Largest payload we publish: MQTT_MAX_PAYLOAD_KB minus MQTT_PAYLOAD_RESERVE_BYTES
+    (headroom for thin-edge mapper wrapping and protocol overhead)."""
+    return int(CONFIG["MQTT_MAX_PAYLOAD_KB"] * 1024) - CONFIG["MQTT_PAYLOAD_RESERVE_BYTES"]
+
 def publish_msg(topic: str, msg: str):
     if mqtt_client:
         timeout = CONFIG.get("MQTT_PUBLISH_TIMEOUT", 1)
-        size_kb = len(msg.encode("utf-8")) / 1024
-        max_kb = CONFIG["MQTT_MAX_PAYLOAD_KB"]
-        if size_kb > max_kb:
-            log.error("MQTT payload on topic %s is %.2f KB, above the %s KB limit even after splitting; it may be rejected by Cumulocity.", topic, size_kb, max_kb)
+        size = len(msg.encode("utf-8"))
+        size_kb = size / 1024
+        if size > max_payload_bytes():
+            log.error("Dropping MQTT payload on topic %s: %d bytes exceeds the %d byte limit even after splitting.", topic, size, max_payload_bytes())
+            return
         result = mqtt_client.publish(topic, msg)
         result.wait_for_publish(timeout=timeout)
         if not result.is_published():
@@ -155,14 +166,13 @@ def publish_msg(topic: str, msg: str):
         log.error("MQTT client is not connected.")
 
 def split_series(series: Dict[str, Any], build_payload, shrink=None) -> List[str]:
-    """Serialize build_payload(chunk) for chunks of series, each kept under MQTT_MAX_PAYLOAD_KB
-    minus MQTT_PAYLOAD_RESERVE_BYTES (headroom for thin-edge mapper wrapping and protocol overhead).
+    """Serialize build_payload(chunk) for chunks of series, each kept under max_payload_bytes().
 
     build_payload must embed the chunk dict exactly once, so compact JSON size is
     len(build_payload({})) + sum of the "key":value entries + the commas between them.
     If a single entry cannot fit on its own, shrink(key, value, max_entry_bytes) may return a smaller value.
     """
-    max_bytes = int(CONFIG["MQTT_MAX_PAYLOAD_KB"] * 1024) - CONFIG["MQTT_PAYLOAD_RESERVE_BYTES"]
+    max_bytes = max_payload_bytes()
     dumps = lambda obj: json.dumps(obj, separators=(",", ":"))
     base = len(dumps(build_payload({})))
 
