@@ -1,5 +1,6 @@
 services:
   historian_integration:
+    restart: unless-stopped
     extra_hosts:
       - "host.containers.internal:host-gateway"
     build:
