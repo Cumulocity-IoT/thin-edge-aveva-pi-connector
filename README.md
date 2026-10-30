@@ -16,6 +16,11 @@ A Python-based service for [thin-edge](https://thin-edge.io/) designed to read d
 - Digital and enumeration tag support (handles JSON/dict values from PI digital points)
 - Stable tag-to-batch assignment — each PI tag is permanently mapped to a batch ID regardless of adding or removing other tags
 - Application logs written to `/etc/tedge/c8y/logs/` (persisted on host via volume mount, daily rotation)
+- Batched publishing: tags are grouped into batches of `BATCH_SIZE`, each published as its own measurement type
+- Payload splitting: batches larger than `MQTT_MAX_PAYLOAD_KB` are split into several MQTT messages so each stays under the Cumulocity 16 KB limit
+- Configuration validation: invalid payload limits in `pi_config.json` are logged and replaced with safe defaults before they are applied, so a bad reload never stops publishing
+- Automatic container restart (`restart: unless-stopped`) after a crash or a device reboot
+- Offline (air-gapped) installation using a pre-built Docker image tarball
 
 ## Requirements
 
@@ -40,7 +45,8 @@ The following configuration files must be uploaded to the Cumulocity tenant for 
         "PI_URL": "https://default-url.com/piwebapi",
         "BATCH_SIZE": 60,
         "MQTT_PUBLISH_TIMEOUT": 1,
-        "MQTT_MAX_PAYLOAD_KB": 16
+        "MQTT_MAX_PAYLOAD_KB": 16,
+        "MQTT_PAYLOAD_RESERVE_BYTES": 512
     }
     ```
 
@@ -54,6 +60,9 @@ The following configuration files must be uploaded to the Cumulocity tenant for 
     | `BATCH_SIZE` | `60` | Maximum number of PI tags per MQTT measurement batch. Applies to every newly assigned tag; tags already in `tag_batches.json` keep their batch ID even if `BATCH_SIZE` changes. |
     | `MQTT_PUBLISH_TIMEOUT` | `1` | Seconds to wait for MQTT publish acknowledgement. A warning is logged if the message is not confirmed within this window. |
     | `MQTT_MAX_PAYLOAD_KB` | `16` | Maximum size of a single MQTT payload, a number between `1` and `16` (Cumulocity's limit). Any other value logs an error and falls back to `16`. A batch larger than this is split into several messages (see [Payload splitting](#payload-splitting)). |
+    | `MQTT_PAYLOAD_RESERVE_BYTES` | `512` | Bytes kept free in every message for the wrapper thin-edge adds when forwarding to Cumulocity. Each message is at most `MQTT_MAX_PAYLOAD_KB × 1024 − MQTT_PAYLOAD_RESERVE_BYTES` bytes. Must be an integer between `0` and `4096`; any other value logs an error and falls back to `512`. Change it only if Cumulocity rejects messages close to the limit. |
+
+    All keys except `PI_URL`, `PI_USER`, and `PI_PASSWORD` are optional. Values are validated each time the file is loaded, including live reloads. An invalid `MQTT_MAX_PAYLOAD_KB` or `MQTT_PAYLOAD_RESERVE_BYTES` is replaced with its default before the new configuration is applied, and an invalid `BATCH_SIZE` (not a positive integer) falls back to `60` when tags are assigned to batches.
 
 - `datapoints.json`: List of PI tags to read and publish to Cumulocity, with optional friendly names.
 
@@ -161,8 +170,9 @@ Two release assets are published for each version:
 
 | Asset | Description |
 |---|---|
-| `pi_historian_connector_<version>_online.zip` | Standard release — Docker image is pulled from Docker Hub on first run. Requires internet on the target device. |
-| `pi_historian_connector_<version>_offline.zip` | Offline release — includes a pre-built Docker image tarball and pip wheels. No internet required on the target device. |
+| `pi_historian_connector_<version>_online.zip` | Standard release. Contains the source and `Dockerfile`; the image is built on the device on first run, so the device needs internet access to pull `python:3.11-slim` and the pip packages. |
+| `pi_historian_connector_v<version>_offline.zip` | Offline release. Contains a pre-built Docker image tarball and pip wheels. No internet access required on the target device. See [Offline Installation](#offline-installation). |
+| `pi-historian-flow_<version>.tar.gz` | thin-edge flow package for polling PI Web API from tedge-flows. See [pi-historian-flow](pi-historian-flow). |
 
 ---
 
@@ -177,16 +187,16 @@ git clone https://github.com/Cumulocity-IoT/thin-edge-aveva-pi-connector.git
 cd thin-edge-aveva-pi-connector
 
 chmod +x scripts/build_release.sh
-scripts/build_release.sh 0.0.4
+scripts/build_release.sh 1.1.3
 ```
 
 The script will:
-1. Create `pi_historian_connector_v0.0.4_online.zip` — source files only
+1. Create `pi_historian_connector_v1.1.3_online.zip` — source files only
 2. Download pip dependency wheels for Python 3.11 / Linux x86_64
 3. Build the Docker image locally
 4. Export the image as a `.tar.gz` tarball
 5. Generate an offline `docker-compose.yaml` with the correct image reference
-6. Bundle everything into `pi_historian_connector_v0.0.4_offline.zip`
+6. Bundle everything into `pi_historian_connector_v1.1.3_offline.zip`
 7. Clean up all temporary files and staging directories
 
 The release CI (`release.yml`) runs the same script automatically on every tag push (`v*`) and can also be triggered manually via **Actions → Build and Upload ZIP Release → Run workflow**.
@@ -203,7 +213,7 @@ The release CI (`release.yml`) runs the same script automatically on every tag p
    cd pi_historian_connector_v<version>
    ```
 
-3. Start the service (Docker will pull the image on first run):
+3. Start the service (Docker builds the image on first run and restarts the container automatically after a crash or reboot):
    ```bash
    docker compose up -d
    ```
@@ -212,36 +222,75 @@ The release CI (`release.yml`) runs the same script automatically on every tag p
 
 ## Offline Installation
 
-Use this procedure when the target device has **no internet access**. Download the `*_offline.zip` from [releases](https://github.com/Cumulocity-IoT/thin-edge-aveva-pi-connector/releases) or build it using `scripts/build_release.sh`.
+Use this procedure when the target device has **no internet access**. Every file is prepared on a machine with internet access and then copied to the device.
+
+### What you need
+
+| Item | Where to get it | Used for |
+|---|---|---|
+| `pi_historian_connector_v<version>_offline.zip` | [Releases](https://github.com/Cumulocity-IoT/thin-edge-aveva-pi-connector/releases), or build it with `scripts/build_release.sh <version>` | The connector (pre-built Docker image, compose file, logging configuration) |
+| `tedge-full_<version>_<arch>.deb`, `tedge-container-plugin-ng_<version>_<arch>.deb` | `apt-get download tedge-full tedge-container-plugin-ng` | thin-edge, only if it is not installed on the device yet |
+| `scripts/tedge_setup.sh` | This repository | Automated thin-edge setup in offline mode |
+
+> The offline image is built for **Linux x86_64** (`python:3.11-slim`, `manylinux2014_x86_64` wheels). It does not run on ARM devices such as a Raspberry Pi.
 
 ### Prerequisites on the target device
 
 - Docker installed and running
-- `unzip` installed
 - `docker compose` (v2) or `docker-compose` (v1) available
+- `unzip` installed
+- `sudo` access
 
-### Step 1 — Transfer the release bundle
+### Step 1: Install thin-edge offline (skip if already installed)
 
-Copy the `*_offline.zip` to the target device via USB, SCP, or any other transfer method:
-
-```bash
-scp pi_historian_connector_v0.0.4_offline.zip user@<device-ip>:/home/user/
-```
-
-### Step 2 — Unzip the bundle
+On the machine with internet access, stage the thin-edge packages next to the setup script:
 
 ```bash
-unzip pi_historian_connector_v0.0.4_offline.zip -d pi_historian_connector_v0.0.4
-cd pi_historian_connector_v0.0.4
+mkdir -p scripts/packages
+apt-get download tedge-full tedge-container-plugin-ng
+mv *.deb scripts/packages/
 ```
 
-The zip extracts files directly at the top level:
+Copy `scripts/` to the device and run the setup script in offline mode:
+
+```bash
+scp -r scripts/ user@<device-ip>:/home/user/
+ssh user@<device-ip>
+chmod +x scripts/tedge_setup.sh
+scripts/tedge_setup.sh install --offline
+```
+
+The script installs thin-edge from the local `.deb` files, connects the device to Cumulocity with a one-time password, sets `mqtt.bind.address` to `0.0.0.0`, and creates default `pi_config.json` and `datapoints.json` files in `/etc/tedge/c8y/`. The device still needs network access to your Cumulocity tenant. See [scripts/README.md](scripts/README.md#offline-installation) for details.
+
+If thin-edge is already installed, make sure Mosquitto accepts connections from Docker containers (see [thin-edge MQTT configuration](#thin-edge-mqtt-configuration)).
+
+### Step 2: Transfer the release bundle
+
+Create a directory for the connector on the device and copy the offline ZIP into it using SCP, USB, or any other transfer method:
+
+```bash
+# On the device
+sudo mkdir -p /pi_connector
+sudo chown "$USER" /pi_connector
+
+# On the machine with the ZIP
+scp pi_historian_connector_v1.1.3_offline.zip user@<device-ip>:/pi_connector/
+```
+
+### Step 3: Unzip the bundle
+
+```bash
+cd /pi_connector
+unzip pi_historian_connector_v1.1.3_offline.zip
+```
+
+The ZIP extracts its files directly into the current directory:
 
 ```
-docker-compose.yaml                            # offline service definition (pre-configured)
+docker-compose.yaml                            # offline service definition (uses the pre-loaded image, restart: unless-stopped)
 logging.conf                                   # logging configuration (writes to /etc/tedge/c8y/logs/)
 requirements.txt                               # Python dependencies (reference only)
-pi_historian_connector_0.0.4.tar.gz            # pre-built Docker image tarball
+pi_historian_connector_1.1.3.tar.gz            # pre-built Docker image tarball
 packages/                                      # pip wheels for offline pip install
   ├── requests-*.whl
   ├── urllib3-*.whl
@@ -250,10 +299,10 @@ packages/                                      # pip wheels for offline pip inst
   └── ...
 ```
 
-### Step 3 — Load the Docker image
+### Step 4: Load the Docker image
 
 ```bash
-docker load < pi_historian_connector_0.0.4.tar.gz
+docker load < pi_historian_connector_1.1.3.tar.gz
 ```
 
 Verify the image was loaded:
@@ -264,36 +313,51 @@ docker images | grep pi_historian_connector
 
 Expected output:
 ```
-pi_historian_connector   0.0.4   <id>   ...
+pi_historian_connector   1.1.3   <id>   ...
 ```
 
-### Step 4 — Ensure config files are in place
+The generated `docker-compose.yaml` references this exact tag (`image: pi_historian_connector:1.1.3`), so Docker never tries to pull or build it.
 
-The service mounts `/etc/tedge/c8y` for both configuration and log output. Make sure the following files exist on the device before starting:
+### Step 5: Check the configuration files
+
+The service mounts `/etc/tedge/c8y` for configuration and log output. Make sure the following files exist on the device before starting:
 
 ```
 /etc/tedge/c8y/pi_config.json
 /etc/tedge/c8y/datapoints.json
 ```
 
-Application logs are written to `/etc/tedge/c8y/logs/pi_historian.log` on the host (rotated daily, 3 days retained).
+`tedge_setup.sh` creates both files with default values. Update `PI_URL`, `PI_USER`, `PI_PASSWORD` (base64-encoded), and the tag list for your PI server, either locally or by pushing them from Cumulocity Configuration Management. See the [Configuration](#configuration) section for the expected formats. `tag_batches.json` is created by the service on first run.
 
-> These config files are created automatically by `scripts/tedge_setup.sh install` — see [scripts/README.md](scripts/README.md).
+### Step 6: Start the service
 
-See the [Configuration](#configuration) section for the expected file formats.
-
-### Step 5 — Start the service
+Start it with Docker Compose:
 
 ```bash
 docker compose up -d
 ```
 
-### Step 6 — Verify it is running
+Or deploy it from Cumulocity: upload the offline ZIP to Software Management with the software type `container-group` and install it on the device, as described in [Production Deployment via Cumulocity](#production-deployment-via-cumulocity). Load the image (Step 4) first, because the device cannot pull it.
+
+### Step 7: Verify it is running
 
 ```bash
 docker compose ps
 docker compose logs -f
+tail -f /etc/tedge/c8y/logs/pi_historian.log
 ```
+
+Application logs are written to `/etc/tedge/c8y/logs/pi_historian.log` on the host (rotated daily, 3 days retained). Each cycle logs the published batches, the number of parts per batch, and the payload size in KB. The container uses `restart: unless-stopped`, so Docker restarts it after a crash or a device reboot.
+
+### Upgrading an offline installation
+
+1. Copy the new `*_offline.zip` to the device and unzip it into a new directory, for example `/pi_connector/1.1.4`.
+2. Load the new image: `docker load < pi_historian_connector_1.1.4.tar.gz`
+3. Stop the old version from its directory: `docker compose down`
+4. Start the new version from the new directory: `docker compose up -d`
+5. Optionally remove the old image: `docker rmi pi_historian_connector:1.1.3`
+
+Configuration files, `tag_batches.json`, and its backups live in `/etc/tedge/c8y` on the host, so batch IDs are kept across upgrades.
 
 ### Stopping the service
 
